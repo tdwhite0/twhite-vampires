@@ -1,0 +1,21 @@
+[package]
+name = "twhite-topdown"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { version = "0.18", features = ["wav", "vorbis"] }
+avian2d = "0.5"
+rand = "0.8"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "s"
+strip = true
