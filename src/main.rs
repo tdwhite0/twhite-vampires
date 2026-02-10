@@ -11,6 +11,10 @@ use components::NotificationEvent;
 use resources::*;
 use systems::shader_materials::*;
 
+fn game_not_paused(paused: Res<GamePaused>) -> bool {
+    !paused.0
+}
+
 fn main() {
     App::new()
         .set_error_handler(bevy::ecs::error::warn)
@@ -54,6 +58,7 @@ fn main() {
         .init_resource::<PlayerAbilities>()
         .init_resource::<BossSpawnTimer>()
         .init_resource::<DebugSettings>()
+        .init_resource::<GamePaused>()
         .init_resource::<PickupRange>()
         .init_resource::<SelectedCharacter>()
         .init_resource::<systems::enemies::FlockIdCounter>()
@@ -111,7 +116,7 @@ fn main() {
             systems::weapons::updown_system,
             systems::weapons::phiera_system,
             systems::player::pet_follow_player,
-        ).run_if(in_state(GameState::Playing)))
+        ).run_if(in_state(GameState::Playing).and(game_not_paused)))
         .add_systems(Update, (
             systems::weapons::update_boomerangs,
             systems::weapons::update_bone_projectiles,
@@ -132,7 +137,7 @@ fn main() {
             systems::combat::weapon_pickup_collection,
             systems::combat::spawn_weapon_pickups,
             systems::combat::update_particles,
-        ).run_if(in_state(GameState::Playing)))
+        ).run_if(in_state(GameState::Playing).and(game_not_paused)))
         .add_systems(Update, (
             systems::ui::update_hud,
             systems::ui::update_floating_text,
@@ -146,7 +151,7 @@ fn main() {
             systems::boss::boss_contact_damage,
             systems::boss::weapon_boss_collision,
             systems::boss::dash_boss_collision,
-        ).run_if(in_state(GameState::Playing)))
+        ).run_if(in_state(GameState::Playing).and(game_not_paused)))
         .add_systems(Update, (
             systems::boss::boss_death,
             systems::boss::boss_sprite_phase,
@@ -158,12 +163,12 @@ fn main() {
             systems::shader_materials::update_crt_time,
             systems::ui::update_ability_cooldown_flash,
             systems::ui::update_shader_bars,
-        ).run_if(in_state(GameState::Playing)))
+        ).run_if(in_state(GameState::Playing).and(game_not_paused)))
         // Flock enemy systems
         .add_systems(Update, (
             systems::enemies::flock_spawning,
             systems::enemies::flock_movement,
-        ).run_if(in_state(GameState::Playing)))
+        ).run_if(in_state(GameState::Playing).and(game_not_paused)))
         // New boss attack systems
         .add_systems(Update, (
             systems::boss::dragon_breath_attack,
@@ -178,7 +183,7 @@ fn main() {
             systems::boss::update_slime_splits,
             systems::boss::slime_split_damage_player,
             systems::boss::weapon_slime_split_collision,
-        ).run_if(in_state(GameState::Playing)))
+        ).run_if(in_state(GameState::Playing).and(game_not_paused)))
         // Level up state
         .add_systems(Update, (
             systems::ui::handle_level_up_selection,

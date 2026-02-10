@@ -33,6 +33,9 @@ pub enum GameState {
 #[derive(Resource, Default)]
 pub struct NeedsGameInit(pub bool);
 
+#[derive(Resource, Default)]
+pub struct GamePaused(pub bool);
+
 // === Wave Management ===
 #[derive(Resource)]
 pub struct WaveManager {

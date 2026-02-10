@@ -33,13 +33,21 @@ fn noise(p: vec2<f32>) -> f32 {
     );
 }
 
-fn fbm(p: vec2<f32>, octaves: i32) -> f32 {
+// Seamless polar fbm: samples noise on a circle (cos/sin) to avoid
+// any angular discontinuity from atan2
+fn fbm_polar(angle: f32, r: f32, offset: vec2<f32>, octaves: i32, ang_scale: f32, rad_scale: f32) -> f32 {
     var value = 0.0;
     var amp = 0.5;
-    var pos = p;
+    var s = ang_scale;
+    var rv = r * rad_scale;
+    var off = offset;
     for (var i = 0; i < octaves; i++) {
-        value += amp * noise(pos);
-        pos = pos * 2.17;
+        let n1 = noise(vec2(cos(angle) * s, rv) + off);
+        let n2 = noise(vec2(sin(angle) * s, rv + 17.0) + off);
+        value += amp * (n1 + n2) * 0.5;
+        s *= 2.17;
+        rv *= 2.17;
+        off *= 2.17;
         amp *= 0.5;
     }
     return value;
@@ -52,12 +60,9 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     let angle = atan2(uv.y, uv.x);
     let t = globals.time;
 
-    // Polar coordinates for flame pattern
-    let polar = vec2(angle / 6.283 * 8.0, d * 4.0);
-
-    // Flame fbm - scrolls radially outward over time
-    let flame_noise = fbm(polar + vec2(t * 0.5, -t * 2.5), 5);
-    let flame_noise2 = fbm(polar * 1.5 + vec2(-t * 0.3, -t * 3.0), 4);
+    // Seamless flame fbm using cos/sin circle sampling (no atan2 seam)
+    let flame_noise = fbm_polar(angle, d, vec2(t * 0.5, -t * 2.5), 5, 4.0, 4.0);
+    let flame_noise2 = fbm_polar(angle, d, vec2(-t * 0.3, -t * 3.0), 4, 6.0, 6.0);
     let flame = flame_noise * 0.6 + flame_noise2 * 0.4;
 
     // Annular ring SDF

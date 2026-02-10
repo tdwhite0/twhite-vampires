@@ -58,6 +58,7 @@ pub fn toggle_settings_panel(
     weapons: Res<PlayerWeapons>,
     music_state: Res<MusicState>,
     font_state: Res<GameFontState>,
+    mut paused: ResMut<GamePaused>,
 ) {
     for interaction in gear_query.iter() {
         if *interaction != Interaction::Pressed {
@@ -67,9 +68,11 @@ pub fn toggle_settings_panel(
         // Toggle: if panel exists, despawn it; otherwise spawn it
         if let Some(entity) = panel_query.iter().next() {
             commands.entity(entity).despawn();
+            paused.0 = false;
             return;
         }
 
+        paused.0 = true;
         spawn_settings_panel(&mut commands, &debug, &weapons, &music_state, &font_state);
     }
 }
@@ -1232,7 +1235,9 @@ pub fn despawn_settings_ui(
     mut commands: Commands,
     panel_query: Query<Entity, With<SettingsPanel>>,
     gear_query: Query<Entity, With<SettingsGearButton>>,
+    mut paused: ResMut<GamePaused>,
 ) {
+    paused.0 = false;
     for entity in panel_query.iter() {
         commands.entity(entity).despawn();
     }
