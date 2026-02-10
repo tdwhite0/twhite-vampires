@@ -1,17 +1,22 @@
 /* tslint:disable */
 /* eslint-disable */
 
+export function run(): void;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly main: (a: number, b: number) => number;
-    readonly __wasm_bindgen_func_elem_108887: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_105176: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_100817: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_106037: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_108888: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_105177: (a: number, b: number) => void;
+    readonly run: () => void;
+    readonly __wasm_bindgen_func_elem_32284: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_88037: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_162516: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_32446: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_32444: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_32445: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_162529: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_32443: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_88058: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;
