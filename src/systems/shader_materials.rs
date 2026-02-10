@@ -254,6 +254,33 @@ impl Material2d for PhieraMaterial {
     }
 }
 
+// === Whip Slash Material ===
+
+#[derive(ShaderType, Clone, Debug)]
+pub struct WhipData {
+    pub color: Vec4,
+    pub intensity: f32,
+    pub lifetime_frac: f32,
+    pub _pad1: f32,
+    pub _pad2: f32,
+}
+
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+pub struct WhipMaterial {
+    #[uniform(0)]
+    pub data: WhipData,
+}
+
+impl Material2d for WhipMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/whip_slash.wgsl".into()
+    }
+
+    fn alpha_mode(&self) -> AlphaMode2d {
+        AlphaMode2d::Blend
+    }
+}
+
 // === Health Bar Material ===
 
 #[derive(ShaderType, Clone, Debug)]
@@ -318,6 +345,8 @@ pub struct CrtEffect {
     pub scanline_intensity: f32,
     pub phosphor_intensity: f32,
     pub vignette_strength: f32,
+    pub _padding1: f32,
+    pub _padding2: f32,
 }
 
 impl FullscreenMaterial for CrtEffect {

@@ -6,6 +6,7 @@ pub fn enemy_radius_for(kind: EnemyKind) -> f32 {
         EnemyKind::Fast => 8.0,
         EnemyKind::Tank => 14.0,
         EnemyKind::Swarm => 5.0,
+        EnemyKind::Flock => 6.0,
     }
 }
 

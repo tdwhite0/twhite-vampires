@@ -39,7 +39,7 @@ pub fn player_aim_at_mouse(
     window_query: Query<&Window>,
     camera_query: Query<(&Camera, &GlobalTransform), (With<Camera2d>, Without<HudCamera>)>,
     mut player_query: Query<
-        (&Transform, &mut Sprite, &mut AnimationIndices),
+        (&Transform, &mut Sprite, &mut AnimationIndices, &CharacterAnimConfig),
         With<Player>,
     >,
 ) {
@@ -55,29 +55,25 @@ pub fn player_aim_at_mouse(
     let Ok(world_pos) = camera.viewport_to_world_2d(camera_global, cursor_pos) else {
         return;
     };
-    let Ok((player_transform, mut sprite, mut anim_indices)) = player_query.single_mut() else {
+    let Ok((player_transform, mut sprite, mut anim_indices, anim_config)) = player_query.single_mut() else {
         return;
     };
 
     let player_pos = player_transform.translation.truncate();
     let to_mouse = world_pos - player_pos;
 
-    // Hero sprite sheet: 4 columns x 3 rows (40x64 per frame)
-    // Row 0 (indices 0-3): facing down (toward camera)
-    // Row 1 (indices 4-7): facing right (side view)
-    // Row 2 (indices 8-11): facing up (away from camera)
+    // Determine facing direction and pick the right animation row
     let row = if to_mouse.y < -to_mouse.x.abs() * 0.5 {
-        0 // Facing down
+        anim_config.row_front  // Facing down (front)
     } else if to_mouse.y > to_mouse.x.abs() * 0.5 {
-        2 // Facing up
+        anim_config.row_back   // Facing up (back)
     } else {
-        1 // Facing side
+        anim_config.row_side   // Facing side (right)
     };
+    let row_start = row * anim_config.cols;
+    let row_end = row_start + anim_config.frame_count - 1;
 
-    // Update animation range when the row changes so animate_sprites
-    // cycles the correct frames instead of always looping row 0
-    let row_start = row * 4;
-    let row_end = row_start + 3;
+    // Update animation range when the direction changes
     if anim_indices.first != row_start {
         anim_indices.first = row_start;
         anim_indices.last = row_end;

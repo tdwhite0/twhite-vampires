@@ -1,0 +1,850 @@
+# Prompts from 2026-02-08
+# Total: 100 prompts across projects
+
+
+============================================================
+Project: twhite-rust-cli
+============================================================
+
+--- [2026-02-07 20:52:18] ---
+We need the pegs to look bouncier. They should grow in size briefly and light up, creating a very satisfying bouncy visual effect for when the shapes hit the pegs.
+
+
+============================================================
+Project: twhite-topdown
+============================================================
+
+--- [2026-02-08 01:34:48] ---
+Use the Bevy agent to create a new game using bevy. Use the setup from ../twhite-rust-cli with avian2d and bevy 0.18 ECS. Instead of being a Shape Drop game, this game should be a 2d topdown Vampire Survivors like game where the player is in the center and the camera follows them as they walk around an arena and enemies spawn around them. The player should lose health if they touch an enemy. There should be different weapons the player can pick up that do different things to attack the enemies. Build this with no assets, just make wireframes with raw shapes. Make a full game.
+
+--- [2026-02-08 01:37:01] ---
+yes
+
+
+
+
+============================================================
+Project: twhite-topdown
+============================================================
+
+--- [2026-02-08 14:09:53] ---
+the enemy skeleton sprites seem to jump around as if they arent part of the same sprite
+
+--- [2026-02-08 14:26:51] ---
+Now we need to make some shaders for the weapon animations. Think like Inigo to make some interesting shader effects for the attacks.
+
+--- [2026-02-08 14:49:27] ---
+The player sprite seems to reversed when we press left and right, fix that.
+
+--- [2026-02-08 14:52:27] ---
+find a CC sprite asset for the dog, we need that to be a separate sprite sheet. RIght now it looks like a Knight and we want it to be a dog.
+
+--- [2026-02-08 14:56:02] ---
+Add a sound system so that we can hear audio effects when things happen in the game. Just use chordal tones so that it sounds like a slot machine with pleasing effects when they all meld together.
+
+--- [2026-02-08 15:01:22] ---
+Implement the following plan:
+
+# Procedural Audio System + Background Music
+
+## Context
+The game currently has no audio at all. We need to add procedurally generated chordal tones (slot-machine style, pentatonic scale so everything harmonizes) for game events, plus a procedural background music loop.
+
+## Musical Design
+- **Scale**: C Major Pentatonic (C, D, E, G, A) - all notes harmonize naturally
+- **SFX**: Short sine-wave tones with attack/decay envelopes, random note selection for frequent events
+- **Background music**: Procedural looping ambient pad using sustained pentatonic tones
+
+| Event | Tone | Duration | Volume |
+|-------|------|----------|--------|
+| Enemy death | Random pentatonic note (C4-A4) | 80ms | 0.15 |
+| XP gem collected | Random high note (C5/E5/G5) + harmonic shimmer | 60ms | 0.12 |
+| Player damage | Low C3+E3 crunch with noise | 150ms | 0.35 |
+| Level up | Rising arpeggio C4->E4->G4->C5 | 600ms | 0.30 |
+| Game start | Bright chord C4+E4+G4 arpeggio | 500ms | 0.25 |
+| Game over | Descending C4->G3->E3->C3 | 800ms | 0.30 |
+| Weapon pickup | Two-tone chime C5->E5 | 200ms | 0.25 |
+| Upgrade selected | Chord stab C5+G5 | 120ms | 0.20 |
+| Projectile burst fire | Sharp E5 ping | 100ms | 0.10 |
+| Lightning zap fire | A4 + crackle | 100ms | 0.10 |
+| Flame aura pulse | Low G3 whoosh | 100ms | 0.07 |
+| Boomerang fire | D4 spin tone | 100ms | 0.10 |
+| Background music | Slow pentatonic pad loop | ~10s loop | 0.08 |
+
+## Implementation
+
+### Step 1: Create `src/systems/audio.rs` (new file, ~250 lines)
+Core audio generation and resource setup:
+- `generate_wav(sample_rate, samples) -> Vec<u8>` - encode i16 PCM samples as WAV bytes
+- `generate_tone(freq, duration, sample_rate, attack_ms, decay_ms) -> Vec<i16>` - sine wave with envelope
+- `generate_tone_with_harmonic(freq, duration, sample_rate, attack, decay, harmonic_ratio, harmonic_amp)` - for shimmery XP sounds
+- `generate_arpeggio(notes_with_offsets, total_duration, sample_rate, attack, decay)` - for level up/game start/game over
+- `generate_noise_tone(freqs, duration, sample_rate, noise_amount)` - for damage crunch
+- `generate_background_loop(sample_rate) -> Vec<i16>` - ambient pentatonic pad, ~10 seconds
+- `pub fn setup_sound_assets(commands, audio_assets)` - startup system that builds all sounds and inserts `SoundAssets` resource
+
+### Step 2: Add `SoundAssets` resource to `src/resources.rs`
+```rust
+#[derive(Resource)]
+pub struct SoundAssets {
+    pub enemy_death: [Handle<AudioSource>; 5],  // 5 pentatonic variants
+    pub xp_gem: [Handle<AudioSource>; 3],       // 3 high-register variants
+    pub player_damage: Handle<AudioSource>,
+    pub level_up: Handle<AudioSource>,
+    pub game_start: Handle<AudioSource>,
+    pub game_over: Handle<AudioSource>,
+    pub weapon_pickup: Handle<AudioSource>,
+    pub upgrade_selected: Handle<AudioSource>,
+    pub weapon_projectile: Handle<AudioSource>,
+    pub weapon_lightning: Handle<AudioSource>,
+    pub weapon_flame: Handle<AudioSource>,
+    pub weapon_boomerang: Handle<AudioSource>,
+    pub background_music: Handle<AudioSource>,
+}
+```
+
+### Step 3: Update `src/systems/mod.rs`
+Add `pub mod audio;`
+
+### Step 4: Update `src/main.rs`
+- Add `setup_sound_assets` to Startup systems
+- Add `start_background_music` to `OnEnter(GameState::Playing)`
+- Add `stop_background_music` to `OnEnter(GameState::Title)` and `OnEnter(GameState::GameOver)`
+
+### Step 5: Add sound triggers to `src/systems/combat.rs`
+Add `Res<SoundAssets>` param + sound spawn to these functions:
+- `player_enemy_collision` (also needs `Commands`) - play `player_damage` on hit
+- `enemy_death` - play random `enemy_death[0..5]` on kill
+- `xp_gem_collection` - play random `xp_gem[0..3]` on collect
+- `check_level_up` (also needs `Commands`) - play `level_up`
+- `check_game_over` (also needs `Commands`) - play `game_over`
+- `weapon_pickup_collection` - play `weapon_pickup`
+
+### Step 6: Add sound triggers to `src/systems/ui.rs`
+- `handle_title_input` (also needs `Commands`) - play `game_start`
+- `handle_level_up_selection` - play `upgrade_selected`
+
+### Step 7: Add sound triggers to `src/systems/weapons.rs`
+Add `Res<SoundAssets>` param + sound spawn to:
+- `projectile_burst_system` - play `weapon_projectile` on fire
+- `lightning_zap_system` - play `weapon_lightning` on fire
+- `flame_aura_system` (needs `Commands`) - play `weapon_flame` on pulse
+- `boomerang_system` - play `weapon_boomerang` on fire
+- `bone_attack_system` - play `weapon_boomerang` (reuse) on fire
+
+### Step 8: Add background music component + systems to `src/systems/audio.rs`
+- `BackgroundMusic` marker component
+- `pub fn start_background_music(commands, sound_assets, existing)` - spawns looping AudioPlayer
+- `pub fn stop_background_music(commands, query)` - despawns it
+
+## Sound Playing Pattern (used everywhere)
+```rust
+commands.spawn((
+    AudioPlayer::<AudioSource>::new(handle.clone()),
+    PlaybackSettings::DESPAWN.with_volume(Volume::Linear(vol)),
+));
+```
+
+## Verification
+- `cargo check` to verify compilation
+- `cargo run` to hear the sounds in-game
+- Test: enemy deaths should produce pleasant random pings
+- Test: XP collection should sparkle
+- Test: level up should play ascending arpeggio
+- Test: background music should loop during gameplay
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/twhite/.claude/projects/-Users-twhite-Documents-Projects-twhite-topdown/63a9cb26-7abf-4dbe-97d4-2d5dd817dc0d.jsonl
+
+--- [2026-02-08 15:01:52] ---
+The player sprite seems to be flipped when we go up and down. Fix that.
+
+--- [2026-02-08 15:06:24] ---
+thread 'Compute Task Pool (5)' (793434) panicked at src/systems/audio.rs:139:27:
+attempt to subtract with overflow
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+Encountered a panic in system `Enable the debug feature to see the name`!
+Encountered a panic in system `Enable the debug feature to see the name`!
+2026-02-08T15:06:04.472044Z ERROR winit::platform_impl::macos::event_handler: tried to run event handler, but no handler was set
+
+--- [2026-02-08 15:07:37] ---
+The whole game crashes on startup still
+
+--- [2026-02-08 15:18:39] ---
+We need to add a UI for ability slots for the player. They should be rectangles at the bottom left of the screen with a cooldown. The player should start with one ability that is a dash ability. Create the dash ability and cooldown system. Make it so that when the player presses the "e" key, the ability fires if its not on cooldown.
+
+--- [2026-02-08 15:24:59] ---
+The player should deal damage when they are dashing. We should be able to dash through the enemies to damage many at a time.
+
+--- [2026-02-08 15:26:22] ---
+The player should deal damage when they are dashing. We should be able to dash through the enemies to damage many at a time.
+
+--- [2026-02-08 15:28:03] ---
+We need to add a system where we use the mouse position to orient the players sprite towards it. The player should still be able to move in any direction use WASD, but we want to sprite to follow the mouse position and we want to dash in that direction when we dash.
+
+--- [2026-02-08 15:31:50] ---
+We need a system that spawns a boss character on a schedule. For now make it every one minute we spawn a boss. Find a CC sprite for the boss. It should be about 6 times larger than the player. The boss should have a laser attack that it shoots every so often if you are close enough to it. Make a cool boss.
+
+--- [2026-02-08 15:51:43] ---
+When certain things happen in the game, we need to animate some text in from the bottom of the screen to flash in as information for the player like:
+Gained Weapon: weaponName
+Speed Up!
+Boss Spawned!
+and other stuff
+
+--- [2026-02-08 15:54:29] ---
+1
+
+--- [2026-02-08 15:57:03] ---
+1
+
+--- [2026-02-08 15:57:54] ---
+1
+
+--- [2026-02-08 15:58:31] ---
+yes
+
+--- [2026-02-08 16:02:18] ---
+We need to make a "Setting Menu" UI. We should be able to change different settings of the game for debug purposes. Put an icon in the top right where we can click with the mouse to open the Settings Menu.
+
+Here are settings we need to start out with:
+1. Invincible Player -> boolean checkbox
+2. Click to equip weapons: UI with choice for each weapon, when you click one it auto-equips it the player.
+3. Damage Multiplier -> 1.5x, 2.0, 2.5, 3.0 choices that multiple the player damage for debugging.
+
+This should be a nicely made Settings UI for the game.
+
+
+============================================================
+Project: twhite-rust-cli
+============================================================
+
+--- [2026-02-08 16:15:02] ---
+We should also be able to unequip weapons from the debug menu
+
+--- [2026-02-08 16:15:56] ---
+The settings window button should be in the bottom right insted of the top right
+
+--- [2026-02-08 16:17:13] ---
+It doesnt look like ti moved to the bottom right to me
+
+--- [2026-02-08 16:17:47] ---
+run it and take a screenshot
+
+
+============================================================
+Project: twhite-topdown
+============================================================
+
+--- [2026-02-08 16:18:34] ---
+movre the setting menu to the bottom right
+
+--- [2026-02-08 16:19:15] ---
+add the CRT overlay system from  ../twhite-rust-cli game. We want to be able to control it from the settings menu as well.
+
+--- [2026-02-08 16:20:29] ---
+we need to be able to unequip weapons from the settings menu as well
+
+--- [2026-02-08 16:22:11] ---
+Implement the following plan:
+
+# Plan: Add CRT Overlay System with Settings Toggle
+
+## Context
+Port the fullscreen CRT post-processing effect from `twhite-rust-cli` into `twhite-topdown`. The CRT effect uses Bevy's `FullscreenMaterial` system — a component added to the Camera2d entity that renders a fullscreen shader pass after tonemapping. It should be toggleable from the existing settings menu.
+
+## Files to Modify
+1. **`assets/shaders/crt_effect.wgsl`** — NEW: Copy shader from source project (unchanged)
+2. **`src/systems/shader_materials.rs`** — Add `CrtEffect` struct + `FullscreenMaterial` impl
+3. **`src/resources.rs`** — Add `crt_enabled: bool` field to `DebugSettings`
+4. **`src/components.rs`** — Add `SettingsCrtToggle` and `SettingsCrtCheck` components
+5. **`src/main.rs`** — Register `FullscreenMaterialPlugin::<CrtEffect>`, add `update_crt_time` system
+6. **`src/systems/ui.rs`** — Add CRT toggle section to settings panel + handler system
+
+## Steps
+
+### 1. Copy the WGSL shader
+Create `assets/shaders/crt_effect.wgsl` — exact copy from `twhite-rust-cli/assets/shaders/crt_effect.wgsl`. Uses `FullscreenVertexOutput`, samples `screen_texture`, applies barrel distortion, scanlines, chromatic aberration, phosphor mask, vignette, and flicker.
+
+### 2. Add CrtEffect material to `shader_materials.rs`
+Add new imports from `bevy::core_pipeline` and `bevy::render`:
+```rust
+use bevy::core_pipeline::{core_2d::graph::{Core2d, Node2d}, fullscreen_material::FullscreenMaterial};
+use bevy::render::extract_component::ExtractComponent;
+use bevy::render::render_graph::{InternedRenderLabel, InternedRenderSubGraph, RenderLabel, RenderSubGraph};
+```
+
+Add the `CrtEffect` struct (Component + ExtractComponent + ShaderType) and `FullscreenMaterial` impl — identical to source project's `materials.rs` lines 32-58.
+
+Add `update_crt_time` system that increments `crt.time` each frame (runs during Playing state).
+
+### 3. Add `crt_enabled` to `DebugSettings` in `resources.rs`
+Add `pub crt_enabled: bool` field, defaulting to `false`.
+
+### 4. Add UI components to `components.rs`
+```rust
+#[derive(Component)]
+pub struct SettingsCrtToggle;
+
+#[derive(Component)]
+pub struct SettingsCrtCheck;
+```
+
+### 5. Register plugin and systems in `main.rs`
+- Add `use bevy::core_pipeline::fullscreen_material::FullscreenMaterialPlugin;`
+- Add `.add_plugins(FullscreenMaterialPlugin::<CrtEffect>::default())` after existing Material2d plugins
+- Add `systems::shader_materials::update_crt_time` to the Playing-state update systems
+- Add `systems::ui::handle_settings_crt` to the settings menu system group
+
+### 6. Add CRT toggle to settings panel in `ui.rs`
+- Pass `crt_enabled` through `spawn_settings_panel` (read from `DebugSettings`)
+- Add a "DISPLAY" section after the DAMAGE MULTIPLIER section with a CRT Filter toggle button (same pattern as Invincible toggle)
+- Add `handle_settings_crt` system: toggles `debug.crt_enabled`, inserts/removes `CrtEffect` component on Camera2d entity, updates button visuals
+
+CRT default params when enabling (matching source project defaults):
+- curvature: 0.15 (0.30 * 0.5)
+- chromatic_aberration: 0.003 (0.30 * 0.01)
+- scanline_intensity: 0.25
+- phosphor_intensity: 0.25
+- vignette_strength: 1.8 (0.60 * 3.0)
+
+## Verification
+1. `cargo build` — confirms compilation
+2. Run game, open settings gear — should see new "DISPLAY" section with "CRT Filter" toggle
+3. Toggle CRT on — screen should show barrel distortion, scanlines, phosphor dots, vignette
+4. Toggle CRT off — screen returns to normal
+5. CRT toggle state persists while panel is closed/reopened
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/twhite/.claude/projects/-Users-twhite-Documents-Projects-twhite-topdown/3f6fb420-d38a-414b-b63c-1b8c99b4bd73.jsonl
+
+--- [2026-02-08 17:05:49] ---
+We need to add a chance to spawn healing dots when destroying an enemy. There should be a small chance to spawn a blue healing dot that restores a little of you HP when you get it.
+
+--- [2026-02-08 17:07:23] ---
+We need to add another weapon that the player can equip that has an AOE effect like Santa Water from Vampire Surviovors. Here is a reference for how that works, youll have to make it more simple for this game: https://vampire-survivors.fandom.com/wiki/Santa_Water
+
+--- [2026-02-08 17:08:49] ---
+We need to add background music options to the settings like we do on ../twhite-rust-cli game. We should copy the background music from that game and put it in ours and set it up like we have there.
+
+--- [2026-02-08 17:11:17] ---
+1
+
+--- [2026-02-08 17:11:32] ---
+1
+
+--- [2026-02-08 17:11:49] ---
+1
+
+--- [2026-02-08 17:12:10] ---
+The CRT filter should be enabled by default
+
+--- [2026-02-08 17:15:32] ---
+yes
+
+--- [2026-02-08 17:15:51] ---
+yes
+
+--- [2026-02-08 17:16:01] ---
+yes
+
+--- [2026-02-08 17:18:39] ---
+leave the HolyWater, another agent is doing that
+
+--- [2026-02-08 17:27:21] ---
+We need to add tabs to the setting menu because it gets too big right now. Also, we need to add a toggle for the keyboard to be "ijkl" letters or "wasd" letters so a left handed person can change it.
+
+--- [2026-02-08 17:28:29] ---
+We need to make the Holy Water more of an oblong oval shape.
+
+--- [2026-02-08 17:28:51] ---
+2
+
+--- [2026-02-08 17:32:54] ---
+Instead of pressing the "e" key for Dash, we want to press spacebar. Also, we want to Dash the player in the direction they are moving with theys and not follow their mouse pointer.
+
+--- [2026-02-08 17:35:19] ---
+We need a game mechanic like Attractorb: https://vampire-survivors.fandom.com/wiki/Attractorb
+
+We should be able to use it to add to the pickup range of our player so that they can pick up health and exp dots from farther away based on its level.
+
+--- [2026-02-08 17:41:15] ---
+The UI still shows "E", it should say "space" instead
+
+--- [2026-02-08 17:48:33] ---
+If we try to press an abilit button like Dash, and we are still on cooldown we should flash the UI part with a red overlay briefly.
+
+--- [2026-02-08 17:49:41] ---
+The Eyeball Terror boss shoots a laser, but it looks like the laser emanates from the center of it when it should emanate from where the iris of the eyeball actually is
+
+--- [2026-02-08 17:56:37] ---
+I dont think this is quite right, its better but the starting point of the beam still doesnt match to where the iris is. Maybe its scaling related?
+
+--- [2026-02-08 17:57:51] ---
+We need to add tabs to the settings menu because it gets too tall right now. We should be able to select categories of settings using the menu.
+
+--- [2026-02-08 18:03:52] ---
+Instead of being a health bar at the top of the screen, it should follow above the boss itself. We should see the name above the health bar and it should follow the boss instead of being a global health bar.
+
+--- [2026-02-08 18:15:15] ---
+We need the laser that shoots from the eyeball terror to be relative the boss that spawned it because we might have more than 1 boss at a time in the game and right now it looks like all the beams are coming from a global position insted of the individual one
+
+--- [2026-02-08 18:16:40] ---
+We need the lines on the background to pulse with light in a shader. We want the background to look more dynamic so use a shader to animate the pulsing lines so it looks like we are walking in a techno-futuristic arena.
+
+--- [2026-02-08 18:19:00] ---
+When we damage a boss, we need to flash red numbers indicating how much we hurt them for.
+
+--- [2026-02-08 18:27:12] ---
+We need a debug menu option in the settings that enables bounding box outlines on the bosses. We want to be able to debug weapon and damage collisions using this visually.
+
+--- [2026-02-08 18:32:40] ---
+Add a line to claude.md that tells agents to put Debug Settings in the settings menu when features are created.
+
+--- [2026-02-08 18:33:07] ---
+Hmm, I dont actually see anything lighting up
+
+--- [2026-02-08 18:34:12] ---
+Use the bevy agent to take a good look at all the systems and modules in the game and create a list of ways we can simplify it to make it more functional, easy to understand, and easy to edit.
+
+--- [2026-02-08 18:37:58] ---
+do the high impact ones
+
+--- [2026-02-08 18:38:51] ---
+I see it working now. Now we need to make it way less prominent, it should be a subtle visual.
+
+--- [2026-02-08 18:40:46] ---
+I like the way it was before we added the shader for the background, put it back the way it was oringially.
+
+--- [2026-02-08 18:43:40] ---
+Implement the following plan:
+
+# Plan: High-Impact Simplifications
+
+## Context
+`ui.rs` is 1,719 lines (26% of the codebase), `settings_button_hover` has 9 redundant queries with massive `Without<>` filters, and weapon collision code is duplicated between `combat.rs` and `boss.rs`. These three issues make the code hard to navigate, edit, and maintain.
+
+---
+
+## Refactor 1: Split ui.rs into ui/ module
+
+**Delete:** `src/systems/ui.rs`
+
+**Create:** `src/systems/ui/mod.rs`
+```rust
+mod screens;
+mod settings;
+mod hud;
+mod notifications;
+
+pub use screens::*;
+pub use settings::*;
+pub use hud::*;
+pub use notifications::*;
+```
+
+**Create:** `src/systems/ui/screens.rs` — Move from ui.rs:
+- `spawn_title_screen`, `despawn_title_screen`, `handle_title_input`
+- `spawn_game_over_screen`, `handle_game_over_input`
+- `spawn_level_up_screen`, `generate_upgrades` (private), `handle_level_up_selection`, `apply_upgrade` (private), `despawn_level_up_screen`, `button_hover_visuals`
+- Imports: `bevy::prelude::*`, `rand::Rng`, `crate::components::*`, `crate::resources::*`, `crate::systems::startup`
+
+**Create:** `src/systems/ui/settings.rs` — Move from ui.rs:
+- Constants: `PANEL_BG`, `SECTION_BG`, `BTN_DEFAULT`, `BTN_HOVER`, `BTN_ACTIVE`, `BTN_ACTIVE_HOVER`, `ACCENT`, `MUTED`, `TAB_ACTIVE_BG`, `TAB_INACTIVE_BG`
+- `spawn_settings_gear`, `toggle_settings_panel`, `rebuild_settings_panel` (pub wrapper), `spawn_settings_panel` (private), all `handle_settings_*` functions, `settings_button_hover`, `despawn_settings_ui`
+- Imports: `bevy::prelude::*`, `bevy::ui::RelativeCursorPosition`, `crate::components::*`, `crate::resources::*`, `crate::systems::startup`, `crate::systems::shader_materials::CrtEffect`
+
+**Create:** `src/systems/ui/hud.rs` — Move from ui.rs:
+- `draw_arena_grid`, `draw_weapon_effects`, `update_hud`, `update_floating_text`, `update_ability_ui`, `update_ability_cooldown_flash`, `draw_boss_hitboxes`, `draw_pickup_labels`
+- Imports: `bevy::prelude::*`, `crate::components::*`, `crate::resources::*`
+
+**Create:** `src/systems/ui/notifications.rs` — Move from ui.rs:
+- Constants: `TOAST_LIFETIME`, `TOAST_SLIDE_DURATION`, `TOAST_FADE_START`, `TOAST_SLOT_HEIGHT`, `TOAST_BASE_BOTTOM`
+- `spawn_notification_toasts`, `update_notification_toasts`
+- Imports: `bevy::prelude::*`, `crate::components::*`
+
+**No changes needed:** `main.rs`, `systems/mod.rs`, `audio.rs` — all paths resolve through re-exports.
+
+---
+
+## Refactor 2: Unify settings button hover
+
+**Modify:** `src/components.rs` — Add after line 373 (after `SettingsBossHitboxCheck`):
+```rust
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub enum SettingsButtonKind {
+    Invincible,
+    Weapon(WeaponKind),
+    Damage(f32),
+    Gear,
+    MusicTrack(usize),
+    MusicMute,
+    Tab(crate::resources::SettingsTab),
+    SpawnBoss,
+    BossHitbox,
+    Crt,
+}
+```
+
+**Modify:** `src/systems/ui/settings.rs` — In `spawn_settings_gear`, add `SettingsButtonKind::Gear` to the gear button spawn tuple.
+
+**Modify:** `src/systems/ui/settings.rs` — In `spawn_settings_panel`, add corresponding `SettingsButtonKind` variant to every button spawn (9 locations: invincible toggle, damage buttons, spawn boss, boss hitbox toggle, weapon buttons, CRT toggle, music track buttons, music mute, tab buttons). Keep existing marker components — they're still used by individual handler systems.
+
+**Modify:** `src/systems/ui/settings.rs` — Replace the 120-line `settings_button_hover` function (9 queries, 12 params) with a single-query version (~40 lines, 4 params):
+```rust
+pub fn settings_button_hover(
+    mut query: Query<(&Interaction, &mut BackgroundColor, &SettingsButtonKind), Changed<Interaction>>,
+    debug: Res<DebugSettings>,
+    weapons: Res<PlayerWeapons>,
+    music_state: Res<MusicState>,
+) {
+    for (interaction, mut bg, kind) in query.iter_mut() {
+        // determine is_active from kind + resources
+        // determine color from (kind, interaction, is_active)
+        // exact color logic preserved from original 9 blocks
+    }
+}
+```
+
+Active state logic per kind (verified against original):
+- `Invincible` → `debug.invincible`
+- `Weapon(wk)` → `weapons.has(wk)`
+- `Damage(mult)` → `(debug.damage_multiplier - mult).abs() < 0.01`
+- `Gear` → never active
+- `MusicTrack(idx)` → `idx == music_state.selected && !music_state.muted`
+- `MusicMute` → `music_state.muted`
+- `Tab(tab)` → `tab == debug.settings_tab`
+- `SpawnBoss` → never active
+- `BossHitbox` → `debug.show_boss_hitboxes`
+- `Crt` → `debug.crt_enabled`
+
+Special color rules (gear, tab, spawn boss, music mute have unique palettes; all others use standard BTN_DEFAULT/BTN_HOVER/BTN_ACTIVE/BTN_ACTIVE_HOVER).
+
+---
+
+## Refactor 3: Extract shared collision helpers
+
+**Create:** `src/systems/collision.rs`
+```rust
+pub fn enemy_radius_for(kind: EnemyKind) -> f32 { ... }  // moved from combat.rs
+
+pub mod weapon_radii {
+    pub const ORBIT_SHIELD: f32 = 8.0;
+    pub const PROJECTILE: f32 = 4.0;
+    pub const BOOMERANG: f32 = 6.0;
+    pub const BONE: f32 = 6.0;
+}
+```
+
+**Modify:** `src/systems/mod.rs` — Add `pub mod collision;`
+
+**Modify:** `src/systems/combat.rs` — Import `use crate::systems::collision::{enemy_radius_for, weapon_radii};`. Delete local `enemy_radius_for` function. Replace hardcoded `8.0`/`4.0`/`6.0` in `weapon_enemy_collision` with `weapon_radii::*` constants.
+
+**Modify:** `src/systems/boss.rs` — Import `use crate::systems::collision::weapon_radii;`. Replace hardcoded `8.0`/`4.0`/`6.0` in `weapon_boss_collision` with `weapon_radii::*` constants.
+
+---
+
+## Execution Order
+1. Refactor 1 (split ui.rs) — structural, no logic changes
+2. Refactor 3 (collision helpers) — simple extraction
+3. Refactor 2 (button hover unification) — requires most care
+
+## Verification
+- `cargo check` after each refactor
+- `cargo run` after all three — verify: title screen, gameplay, settings panel (all 3 tabs), hover states on every button type, weapon-enemy hits, weapon-boss hits, boss spawn debug button
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/twhite/.claude/projects/-Users-twhite-Documents-Projects-twhite-topdown/7133e370-2e9d-4a92-a66b-954785c4a589.jsonl
+
+--- [2026-02-08 18:45:02] ---
+We need to add a setting for "Game Font" that lets us change the font style for the game dynamically.
+
+--- [2026-02-08 18:49:17] ---
+We need to add shaders for the players health bar that make it look more like a red liquid, kind of like a diablo health bar but still horizontal. We also we want to make the exp bar have its own shader where it has some electricity/energy feel to it.
+
+--- [2026-02-08 18:50:59] ---
+1
+
+--- [2026-02-08 18:51:42] ---
+3
+
+--- [2026-02-08 18:51:57] ---
+2
+
+--- [2026-02-08 18:52:06] ---
+Implement the following plan:
+
+# Plan: Game Font Setting
+
+## Context
+All text in the game uses Bevy's default font (`TextFont { ..default() }`). We want a "Game Font" setting in the A/V tab that lets players cycle through bundled font files, dynamically updating ALL text in the game.
+
+## Approach
+
+### 1. Add font files to `assets/fonts/`
+Download 3 OFL-licensed `.ttf` fonts and place them in `assets/fonts/`:
+- `PressStart2P-Regular.ttf` (pixel font)
+- `VT323-Regular.ttf` (retro terminal font)
+- `SpaceMono-Regular.ttf` (clean monospace)
+
+These are all Google Fonts with OFL licenses.
+
+### 2. Add `GameFontState` resource (`src/resources.rs`)
+```rust
+pub struct GameFont {
+    pub name: &'static str,
+    pub handle: Handle<Font>,
+}
+
+#[derive(Resource)]
+pub struct GameFontState {
+    pub fonts: Vec<GameFont>,
+    pub selected: usize,
+}
+```
+- `current()` method returns `self.fonts[self.selected].handle.clone()`
+- `current_name()` returns the display name
+- `cycle()` advances selected index (wraps around)
+- First entry is "Default" with `Handle::default()` (Bevy's built-in font)
+
+### 3. Load fonts in `setup_assets()` (`src/systems/startup.rs`)
+After existing asset loading, use `asset_server.load("fonts/PressStart2P-Regular.ttf")` etc. and insert `GameFontState` resource.
+
+### 4. Add `apply_font_to_all_text` system (`src/systems/ui/settings.rs`)
+A system that runs whenever `GameFontState` changes:
+```rust
+fn apply_font_to_all_text(
+    font_state: Res<GameFontState>,
+    mut query: Query<&mut TextFont>,
+) {
+    if !font_state.is_changed() { return; }
+    let font = font_state.current();
+    for mut text_font in query.iter_mut() {
+        text_font.font = font.clone();
+    }
+}
+```
+This is the key insight: instead of modifying every spawn site, we use a single reactive system that updates ALL existing `TextFont` components when the font changes. New text spawned with `..default()` will get updated on the next frame.
+
+### 5. Add font cycle button to A/V settings tab (`src/systems/ui/settings.rs`)
+In `spawn_settings_panel()` under `SettingsTab::AudioVideo`, add a FONT section between DISPLAY and AUDIO with a cycle button showing the current font name.
+
+### 6. Add `SettingsFontCycleButton` component (`src/components.rs`)
+New marker component + add `FontCycle` variant to `SettingsButtonKind` enum.
+
+### 7. Add `handle_settings_font_cycle` system (`src/systems/ui/settings.rs`)
+On click: call `font_state.cycle()`, rebuild the settings panel. The `apply_font_to_all_text` system will pick up the change automatically.
+
+### 8. Register new system in `main.rs`
+- Add `apply_font_to_all_text` to the always-running Update systems
+- Add `handle_settings_font_cycle` to the settings menu systems group
+
+## Files to Modify
+1. **`assets/fonts/`** — create directory, add 3 `.ttf` files
+2. **`src/resources.rs`** — add `GameFont`, `GameFontState`
+3. **`src/components.rs`** — add `SettingsFontCycleButton`, add `FontCycle` to `SettingsButtonKind`
+4. **`src/systems/startup.rs`** — load fonts in `setup_assets()`
+5. **`src/systems/ui/settings.rs`** — add font section to A/V tab, add `handle_settings_font_cycle`, add `apply_font_to_all_text`
+6. **`src/main.rs`** — register new systems
+
+## Verification
+1. `cargo check` — compiles without errors
+2. `cargo run` — game starts, default font looks normal
+3. Open settings (gear icon) > A/V tab > click "Font: Default" button
+4. Verify font cycles through Default > Pixel > Retro > Mono > Default...
+5. Verify ALL text updates: title screen, HUD, settings panel, notifications, level-up screen, game over screen, floating damage numbers
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/twhite/.claude/projects/-Users-twhite-Documents-Projects-twhite-topdown/a2671d69-a0dd-4505-b55e-583d827dc87f.jsonl
+
+--- [2026-02-08 18:53:02] ---
+yes
+
+--- [2026-02-08 18:53:17] ---
+yes
+
+--- [2026-02-08 18:53:38] ---
+yes
+
+--- [2026-02-08 18:59:37] ---
+Add a new weapon for the player called "UpDown". It should work like Song of Mana from Vampire Survivors: https://vampire-survivors.fandom.com/wiki/Song_of_Mana
+
+--- [2026-02-08 19:05:13] ---
+We also need to add a Font Size setting so that we can adjst sizes on the fly too.
+
+--- [2026-02-08 19:05:39] ---
+Can we draw the bars over top of the CRT shader so it doesn't apply to those?
+
+--- [2026-02-08 19:12:21] ---
+Use the bevy agent to look for ways we can make our code more functional, modular, and good. Make a plan to make it better
+
+--- [2026-02-08 19:13:44] ---
+Remove the font size option, I dont like it
+
+--- [2026-02-08 19:15:36] ---
+Do the weapon cooldown thing but not the other stuff
+
+--- [2026-02-08 19:18:58] ---
+We need to update the settings UI so that on each individual weapon in the settings UI, we should be able to manually click a level for it, and it will set the weapon to that weapons level. This is so that we can test different weapon levels and combinations.
+
+--- [2026-02-08 19:31:42] ---
+For each individual player weapon, we need to define scaling level for it. Each weapon should be able to define what happens when it goes up a level. For instance, at Level 2 for Holy Water, we want it to increase the AOE for it. For some weapons, we might want to increase its rate of fire. We may even want to change its textures or shaders for that level so it looks really cool. We need each weapon to support that. We need to make a plan for this, first create a table for each weapon that defines what we want to do.
+
+--- [2026-02-08 19:33:02] ---
+sure
+
+--- [2026-02-08 19:34:20] ---
+enable this: https://code.claude.com/docs/en/agent-teams
+
+--- [2026-02-08 19:42:41] ---
+use a subagent team to implement the Weapon leveling plan.
+
+--- [2026-02-08 19:43:21] ---
+write the plan to a file that we can give to a subagent team
+
+--- [2026-02-08 20:08:17] ---
+Use a subagent to find a good CC sprite asset for a new boss. Then we need to add that as a boss to the game. We need to come up with unique boss combat logic for the boss so it should not be like the eyeball one. Create 3 new bosses actually, and then create unique logic for all of them.
+
+--- [2026-02-08 20:17:37] ---
+Implement the following plan:
+
+# Plan: Add 3 New Bosses with Unique Combat Mechanics
+
+## Context
+The game currently has one boss (Eyeball Terror) with a laser sweep attack. We're adding 3 new bosses that each have completely different combat mechanics, using sprites from the existing CC0 `creatures.png` sheet (already loaded) scaled up to boss size.
+
+## Boss Designs
+
+### 1. Dragon Lord
+- **Sprite**: creatures.png index ~60, scale 5.0x
+- **Stats**: HP 600, Speed 50, Contact Damage 25, Radius 45
+- **Attack - Fireball Barrage**: Phase-based (Idle -> Windup 1s -> Firing 2s -> Cooldown 3s). Fires 5 fireballs at 0.4s intervals aimed at player. Each fireball travels in a straight line and on expiry creates a lingering fire zone (radius 40, 8 dmg/tick, 3s). Reuses `ProjectileMaterial` (orange) for fireballs, `FlameAuraMaterial` for fire zones.
+
+### 2. Necromancer
+- **Sprite**: creatures.png index ~34, scale 4.5x
+- **Stats**: HP 450, Speed 35, Contact Damage 15, Radius 40
+- **Attack - Dark Magic**: Cycles through 3 attack types via `attack_index`:
+  - **Summon**: Spawns 4-6 skeleton minions (normal enemies with `NecroSummon` tag, despawn when boss dies)
+  - **Orb Attack**: Fires 3 slow homing dark orbs (speed 120, turn rate 1.5 rad/s, damage 20, lifetime 4s). Reuses `ProjectileMaterial` (purple).
+  - **Teleport**: Blinks to random position 200-350 units from player with particle effects
+
+### 3. Slime King
+- **Sprite**: creatures.png index ~0, scale 5.0x, green tint
+- **Stats**: HP 700, Speed 30, Contact Damage 35, Radius 55
+- **Attack - Jump Slam**: Phase-based (Idle -> Windup 0.8s -> Jump 0.6s -> Land 0.3s -> Cooldown 2s). Squishes during windup, leaps to player's position, creates expanding shockwave ring on landing (damage 25, expands to radius 150). Visual: circle mesh at increasing scale.
+- **Split on Death**: Spawns 2 mini-slimes (`SlimeSplit` entities, HP 100, speed 60, scale 2.5x) that chase player. Mini-slimes are NOT `Boss` entities - they get their own damage/death systems.
+
+## Architecture Decisions
+
+1. **Boss type identification**: Add `BossKind` enum, change `Boss` from unit struct to `Boss { kind: BossKind }`. All existing `With<Boss>` queries continue to work unchanged. `weapon_boss_collision`, `dash_boss_collision`, `holy_water_damages_boss`, `flame_aura_damages_boss` need zero changes since they only interact with `BossHealth`/`Transform`.
+
+2. **Attack systems**: Each boss gets its own attack component + dedicated systems (matching the existing `BossLaser` + `boss_laser_attack` pattern). No generic phase machine.
+
+3. **Sprite animation**: New bosses use a gentle scale-pulse animation (no atlas frames) since creatures.png has single frames per creature. Eyeball keeps its existing atlas animation.
+
+4. **HP phase visuals**: New bosses use `Sprite.color` tinting at 66%/33% HP thresholds (eyeball keeps its texture swap).
+
+5. **Boss rotation**: `BossSpawnTimer` gets `spawn_counter: u32`. Each spawn cycles: Eyeball -> Dragon -> Necro -> Slime -> repeat.
+
+## Files to Modify
+
+### `src/components.rs`
+- Add `BossKind` enum with `display_name()` method
+- Change `Boss` from unit struct to `Boss { kind: BossKind }`
+- Add Dragon components: `DragonBreath`, `DragonBreathPhase`, `DragonFireball`, `DragonFireZone`
+- Add Necromancer components: `NecromancerMagic`, `NecroPhase`, `NecroSummon`, `NecroOrb`
+- Add Slime King components: `SlimeKingAbility`, `SlimePhase`, `SlimeShockwave`, `SlimeSplit`
+
+### `src/resources.rs`
+- Add `spawn_counter: u32` to `BossSpawnTimer`
+- Change `ForceSpawnBoss` from unit struct to `ForceSpawnBoss { kind: Option<BossKind> }`
+
+### `src/systems/boss.rs` (largest changes)
+- Refactor `boss_spawning` to use `boss_kind_from_counter()`, dispatch to per-type spawn functions
+- Refactor `boss_movement` to check boss kind for speed + movement gating per attack phase
+- Refactor `boss_sprite_phase` to branch on kind (texture swap for eyeball, color tint for others)
+- Refactor `boss_animate` to branch on kind (atlas cycling for eyeball, scale pulse for others)
+- Refactor `spawn_boss_health_bar` to use kind for name text + color
+- Refactor `boss_death` to handle per-type cleanup (beams for eyeball, summons for necro, splits for slime)
+- Add 3 new systems for Dragon: `dragon_breath_attack`, `update_dragon_fireballs`, `dragon_fire_damage_player`
+- Add 3 new systems for Necromancer: `necromancer_attack`, `update_necro_orbs`, `necro_orb_damage_player`
+- Add 5 new systems for Slime King: `slime_king_attack`, `update_slime_shockwaves`, `update_slime_splits`, `slime_split_damage_player`, `slime_split_death` + `weapon_slime_split_collision`
+
+### `src/systems/collision.rs`
+- Add `boss_radii` module with per-boss-type radius constants
+
+### `src/main.rs`
+- Add a 5th `add_systems(Update, ...)` group for the ~12 new boss attack systems
+- Update `ForceSpawnBoss` reference if needed
+
+### `src/systems/ui.rs` (minor)
+- Update `ForceSpawnBoss` insertion to use new struct form
+
+## Implementation Order
+
+1. **Phase 1 - Structural refactor**: Add BossKind, change Boss struct, update all existing references, update existing boss systems to branch on kind. `cargo check` to verify.
+2. **Phase 2 - Dragon Lord**: Components, spawn function, 3 attack systems, register in main.rs. Test with debug spawn.
+3. **Phase 3 - Necromancer**: Components, spawn function, 3 attack systems, boss_death cleanup for summons. Register. Test.
+4. **Phase 4 - Slime King**: Components, spawn function, attack + shockwave + split systems. Register. Test.
+5. **Phase 5 - Polish**: Tune sprite indices visually, adjust damage/HP numbers, verify all weapon types work against all bosses.
+
+## Verification
+- `cargo check` after each phase
+- `cargo run` and use the debug "Spawn Boss" button in settings to spawn each boss type
+- Verify each boss spawns with correct sprite, name, health bar
+- Verify each boss's unique attack pattern works
+- Verify player weapons damage all boss types
+- Verify boss death drops XP, shows particles, notification
+- Verify slime king splits on death
+- Verify necromancer summons despawn when necromancer dies
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/twhite/.claude/projects/-Users-twhite-Documents-Projects-twhite-topdown/38d6e8ae-9f02-4d72-b79e-0ff4e161fc71.jsonl
+
+If this plan can be broken down into multiple independent tasks, consider using the TeamCreate tool to create a team and parallelize the work.
+
+--- [2026-02-08 20:32:14] ---
+On the player character sprite, re-do the sprite logic because the sprite is facing the incorrect directions. Just start over on that feature so that we can declare bankruptcy on the old logic.
+
+--- [2026-02-08 20:37:31] ---
+The player should be able to Dash in the direction of their mouse if they click it.
+
+--- [2026-02-08 20:43:38] ---
+commit all outstanding changes and push to git
+
+--- [2026-02-08 23:00:13] ---
+The Eyeball Terror boss has a sweeping laser, but it seems like it shows an indicator of where its going to go, but then it jumps to the end weird. Take a look at that mechanic and make it work better
+
+--- [2026-02-08 23:09:13] ---
+We need to use a subagent team of bevy agents to create a new weapon that like this: https://vampire-survivors.fandom.com/wiki/Phiera_Der_Tuphello
+
+--- [2026-02-08 23:16:48] ---
+IN the setting debug menu, we need a slider to increase and decrease the enemy spawn rate. This is so we can adjust difficulty directly in the UI.
+
+--- [2026-02-08 23:30:21] ---
+Use a subagent team to create and implement a new design for the the Game Over screen, make it more dynamic and engaging.
+
+--- [2026-02-08 23:39:47] ---
+it crashed on startup:
+2026-02-08T23:39:06.431928Z  INFO bevy_winit::system: Creating new window Survivor Arena (0v0)
+
+thread 'main' (1267216) panicked at /Users/twhite/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.0/src/system/system_param.rs:387:5:
+error[B0001]: Query<Enable the debug feature to see the name, Enable the debug feature to see the name> in system Enable the debug feature to see the name accesses component(s) Enable the debug feature to see the name in a way that conflicts with a previous system parameter. Consider using `Without<T>` to create disjoint Queries or merging conflicting Queries into a `ParamSet`. See: https://bevy.org/learn/errors/b0001
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+Encountered a panic in system `Enable the debug feature to see the name`!
+2026-02-08T23:39:06.471198Z ERROR winit::platform_impl::macos::event_handler: tried to run event handler, but no handler was set
+
+--- [2026-02-08 23:53:50] ---
+I got these errors when I moved my weapon in the debug menu from the max level down to level one:
+2026-02-08T23:48:31.978664Z  WARN bevy_ecs::error::handler: Encountered an error in command `Enable the debug feature to see the name`: Entity despawned: The entity with ID 1747v55 is invalid; its index now has generation 56.
+Note that interacting with a despawned entity is the most common cause of this error but there are others
+
+    If you were attempting to apply a command to this entity,
+    and want to handle this error gracefully, consider using `EntityCommands::queue_handled` or `queue_silenced`.
+
+
+thread 'main' (1270785) panicked at /Users/twhite/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.0/src/error/handler.rs:125:1:
+Encountered an error in command `Enable the debug feature to see the name`: Entity despawned: The entity with ID 108v10 is invalid; its index now has generation 11.
+Note that interacting with a despawned entity is the most common cause of this error but there are others
+
+    If you were attempting to apply a command to this e

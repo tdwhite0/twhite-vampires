@@ -16,6 +16,8 @@ struct CrtSettings {
     scanline_intensity: f32,
     phosphor_intensity: f32,
     vignette_strength: f32,
+    _padding1: f32,
+    _padding2: f32,
 }
 
 @group(0) @binding(2) var<uniform> settings: CrtSettings;

@@ -14,6 +14,9 @@ const PICKUP_RADIUS: f32 = 10.0;
 const HEALING_DOT_RADIUS: f32 = 5.0;
 const HEALING_DOT_MAGNET_RADIUS: f32 = 80.0;
 const HEALING_DOT_MAGNET_SPEED: f32 = 250.0;
+const WEAPON_PICKUP_MAGNET_RADIUS: f32 = 90.0;
+const WEAPON_PICKUP_MAGNET_SPEED: f32 = 275.0;
+const MAGNET_SNAP_TIME: f32 = 1.5; // seconds chasing before instant snap
 const HEALING_DOT_DROP_CHANCE: f64 = 0.08; // 8% chance
 
 pub fn player_enemy_collision(
@@ -45,6 +48,7 @@ pub fn player_enemy_collision(
             EnemyKind::Fast => 8.0,
             EnemyKind::Tank => 14.0,
             EnemyKind::Swarm => 5.0,
+            EnemyKind::Flock => 6.0,
         };
 
         let dist = player_pos.distance(enemy_pos);
@@ -118,12 +122,18 @@ pub fn weapon_enemy_collision(
         (&Transform, &mut UpDownWave),
         (Without<Enemy>, Without<Player>, Without<OrbitShield>, Without<Projectile>, Without<BoomerangProjectile>, Without<BoneProjectile>),
     >,
+    // Whip slashes
+    mut whip_query: Query<
+        (&Transform, &mut WhipSlash),
+        (Without<Enemy>, Without<Player>, Without<OrbitShield>, Without<Projectile>, Without<BoomerangProjectile>, Without<BoneProjectile>, Without<UpDownWave>),
+    >,
     mut enemy_query: Query<
         (Entity, &Transform, &mut EnemyHealth, &EnemyType),
         With<Enemy>,
     >,
     weapons: Res<PlayerWeapons>,
     debug: Res<DebugSettings>,
+    mut stats: ResMut<GameStats>,
 ) {
     let dmg_mult = debug.damage_multiplier;
     let orbit_damage = weapons
@@ -149,6 +159,7 @@ pub fn weapon_enemy_collision(
 
             if dist < orbit_radius + enemy_radius {
                 health.0 -= orbit_damage;
+                stats.record_weapon_damage(WeaponKind::OrbitShield, orbit_damage);
                 orbit.hit_cooldown = 0.3;
                 break;
             }
@@ -172,7 +183,9 @@ pub fn weapon_enemy_collision(
             let dist = proj_pos.distance(enemy_pos);
 
             if dist < proj_radius + enemy_radius {
-                health.0 -= projectile.damage * dmg_mult;
+                let dmg = projectile.damage * dmg_mult;
+                health.0 -= dmg;
+                stats.record_weapon_damage(projectile.source, dmg);
                 if projectile.piercing {
                     projectile.hit_enemies.push(enemy_entity);
                 } else {
@@ -200,7 +213,9 @@ pub fn weapon_enemy_collision(
             let dist = boom_pos.distance(enemy_pos);
 
             if dist < boom_radius + enemy_radius {
-                health.0 -= boomerang.damage * dmg_mult;
+                let dmg = boomerang.damage * dmg_mult;
+                health.0 -= dmg;
+                stats.record_weapon_damage(WeaponKind::Boomerang, dmg);
                 boomerang.hit_enemies.push(enemy_entity);
             }
         }
@@ -223,7 +238,9 @@ pub fn weapon_enemy_collision(
             let dist = bone_pos.distance(enemy_pos);
 
             if dist < bone_radius + enemy_radius {
-                health.0 -= bone.damage * dmg_mult;
+                let dmg = bone.damage * dmg_mult;
+                health.0 -= dmg;
+                // Bone is a pet weapon, not tracked per-weapon
                 bone.hit_enemies.push(enemy_entity);
             }
         }
@@ -246,8 +263,41 @@ pub fn weapon_enemy_collision(
             let dist = wave_pos.distance(enemy_pos);
 
             if dist < wave_radius + enemy_radius {
-                health.0 -= wave.damage * dmg_mult;
+                let dmg = wave.damage * dmg_mult;
+                health.0 -= dmg;
+                stats.record_weapon_damage(WeaponKind::UpDown, dmg);
                 wave.hit_enemies.push(enemy_entity);
+            }
+        }
+    }
+
+    // Whip slash collisions (oriented rectangle, piercing, tracks hit enemies)
+    for (slash_transform, mut slash) in whip_query.iter_mut() {
+        if slash.delay > 0.0 {
+            continue;
+        }
+        let slash_pos = slash_transform.translation.truncate();
+
+        for (enemy_entity, enemy_transform, mut health, _enemy_type) in enemy_query.iter_mut() {
+            if health.0 <= 0.0 {
+                continue;
+            }
+            if slash.hit_enemies.contains(&enemy_entity) {
+                continue;
+            }
+            let enemy_pos = enemy_transform.translation.truncate();
+
+            // Oriented rectangle check: transform enemy position into slash's local space
+            let to_enemy = enemy_pos - slash_pos;
+            let local_x = to_enemy.dot(slash.direction);
+            let perp = Vec2::new(-slash.direction.y, slash.direction.x);
+            let local_y = to_enemy.dot(perp);
+
+            if local_x.abs() < slash.half_length && local_y.abs() < slash.half_width {
+                let dmg = slash.damage * dmg_mult;
+                health.0 -= dmg;
+                stats.record_weapon_damage(WeaponKind::Whip, dmg);
+                slash.hit_enemies.push(enemy_entity);
             }
         }
     }
@@ -285,6 +335,7 @@ pub fn enemy_death(
             EnemyKind::Fast => 1.0,
             EnemyKind::Tank => 3.0,
             EnemyKind::Swarm => 0.5,
+            EnemyKind::Flock => 0.8,
         };
 
         commands.spawn((
@@ -303,6 +354,7 @@ pub fn enemy_death(
                 EnemyKind::Basic | EnemyKind::Fast => 5.0,
                 EnemyKind::Tank => 10.0,
                 EnemyKind::Swarm => 3.0,
+                EnemyKind::Flock => 4.0,
             };
             commands.spawn((
                 Mesh2d(game_meshes.healing_dot.clone()),
@@ -335,7 +387,7 @@ pub fn enemy_death(
 
 pub fn xp_gem_collection(
     mut commands: Commands,
-    mut gem_query: Query<(Entity, &mut Transform, &XpGem), Without<Player>>,
+    mut gem_query: Query<(Entity, &mut Transform, &XpGem, Option<&mut MagnetLocked>), Without<Player>>,
     mut player_query: Query<(&Transform, &mut Experience), With<Player>>,
     time: Res<Time>,
     sound_assets: Res<SoundAssets>,
@@ -347,17 +399,32 @@ pub fn xp_gem_collection(
     };
     let player_pos = player_transform.translation.truncate();
     let magnet_radius = XP_MAGNET_RADIUS * pickup_range.multiplier;
+    let dt = time.delta_secs();
 
-    for (entity, mut gem_transform, gem) in gem_query.iter_mut() {
+    for (entity, mut gem_transform, gem, mut locked) in gem_query.iter_mut() {
         let gem_pos = gem_transform.translation.truncate();
         let dist = player_pos.distance(gem_pos);
 
-        // Magnetic attraction
-        if dist < magnet_radius {
+        // Magnetic attraction — once in range, stay locked on and accelerate
+        if dist < magnet_radius && locked.is_none() {
+            commands.entity(entity).insert(MagnetLocked(0.0));
+        }
+        if let Some(ref mut lock) = locked {
+            lock.0 += dt;
+            if lock.0 >= MAGNET_SNAP_TIME {
+                // Snap directly to player
+                gem_transform.translation = player_transform.translation;
+            } else {
+                let direction = (player_pos - gem_pos).normalize_or_zero();
+                let accel = 1.0 + (lock.0 / MAGNET_SNAP_TIME) * 4.0;
+                let speed = XP_MAGNET_SPEED * accel;
+                gem_transform.translation.x += direction.x * speed * dt;
+                gem_transform.translation.y += direction.y * speed * dt;
+            }
+        } else if dist < magnet_radius {
             let direction = (player_pos - gem_pos).normalize_or_zero();
-            let speed = XP_MAGNET_SPEED * (1.0 - dist / magnet_radius);
-            gem_transform.translation.x += direction.x * speed * time.delta_secs();
-            gem_transform.translation.y += direction.y * speed * time.delta_secs();
+            gem_transform.translation.x += direction.x * XP_MAGNET_SPEED * dt;
+            gem_transform.translation.y += direction.y * XP_MAGNET_SPEED * dt;
         }
 
         // Collection
@@ -376,7 +443,7 @@ pub fn xp_gem_collection(
 
 pub fn healing_dot_collection(
     mut commands: Commands,
-    mut dot_query: Query<(Entity, &mut Transform, &HealingDot), Without<Player>>,
+    mut dot_query: Query<(Entity, &mut Transform, &HealingDot, Option<&mut MagnetLocked>), Without<Player>>,
     mut player_query: Query<(&Transform, &mut Health), With<Player>>,
     time: Res<Time>,
     sound_assets: Res<SoundAssets>,
@@ -388,17 +455,31 @@ pub fn healing_dot_collection(
     };
     let player_pos = player_transform.translation.truncate();
     let magnet_radius = HEALING_DOT_MAGNET_RADIUS * pickup_range.multiplier;
+    let dt = time.delta_secs();
 
-    for (entity, mut dot_transform, dot) in dot_query.iter_mut() {
+    for (entity, mut dot_transform, dot, mut locked) in dot_query.iter_mut() {
         let dot_pos = dot_transform.translation.truncate();
         let dist = player_pos.distance(dot_pos);
 
-        // Magnetic attraction
-        if dist < magnet_radius {
+        // Magnetic attraction — once in range, stay locked on and accelerate
+        if dist < magnet_radius && locked.is_none() {
+            commands.entity(entity).insert(MagnetLocked(0.0));
+        }
+        if let Some(ref mut lock) = locked {
+            lock.0 += dt;
+            if lock.0 >= MAGNET_SNAP_TIME {
+                dot_transform.translation = player_transform.translation;
+            } else {
+                let direction = (player_pos - dot_pos).normalize_or_zero();
+                let accel = 1.0 + (lock.0 / MAGNET_SNAP_TIME) * 4.0;
+                let speed = HEALING_DOT_MAGNET_SPEED * accel;
+                dot_transform.translation.x += direction.x * speed * dt;
+                dot_transform.translation.y += direction.y * speed * dt;
+            }
+        } else if dist < magnet_radius {
             let direction = (player_pos - dot_pos).normalize_or_zero();
-            let speed = HEALING_DOT_MAGNET_SPEED * (1.0 - dist / magnet_radius);
-            dot_transform.translation.x += direction.x * speed * time.delta_secs();
-            dot_transform.translation.y += direction.y * speed * time.delta_secs();
+            dot_transform.translation.x += direction.x * HEALING_DOT_MAGNET_SPEED * dt;
+            dot_transform.translation.y += direction.y * HEALING_DOT_MAGNET_SPEED * dt;
         }
 
         // Collection
@@ -457,22 +538,47 @@ pub fn check_game_over(
 
 pub fn weapon_pickup_collection(
     mut commands: Commands,
-    pickup_query: Query<(Entity, &Transform, &WeaponPickup), Without<Player>>,
+    mut pickup_query: Query<(Entity, &mut Transform, &WeaponPickup, Option<&mut MagnetLocked>), Without<Player>>,
     player_query: Query<&Transform, With<Player>>,
     mut weapons: ResMut<PlayerWeapons>,
     weapon_shaders: Res<WeaponShaderHandles>,
     sound_assets: Res<SoundAssets>,
     mut notif_events: MessageWriter<NotificationEvent>,
     orbit_query: Query<Entity, With<OrbitShield>>,
+    pickup_range: Res<PickupRange>,
+    time: Res<Time>,
 ) {
     let Ok(player_transform) = player_query.single() else {
         return;
     };
     let player_pos = player_transform.translation.truncate();
+    let magnet_radius = WEAPON_PICKUP_MAGNET_RADIUS * pickup_range.multiplier;
+    let dt = time.delta_secs();
 
-    for (entity, pickup_transform, pickup) in pickup_query.iter() {
+    for (entity, mut pickup_transform, pickup, mut locked) in pickup_query.iter_mut() {
         let pickup_pos = pickup_transform.translation.truncate();
         let dist = player_pos.distance(pickup_pos);
+
+        // Magnetic attraction — once in range, stay locked on and accelerate
+        if dist < magnet_radius && locked.is_none() {
+            commands.entity(entity).insert(MagnetLocked(0.0));
+        }
+        if let Some(ref mut lock) = locked {
+            lock.0 += dt;
+            if lock.0 >= MAGNET_SNAP_TIME {
+                pickup_transform.translation = player_transform.translation;
+            } else {
+                let direction = (player_pos - pickup_pos).normalize_or_zero();
+                let accel = 1.0 + (lock.0 / MAGNET_SNAP_TIME) * 4.0;
+                let speed = WEAPON_PICKUP_MAGNET_SPEED * accel;
+                pickup_transform.translation.x += direction.x * speed * dt;
+                pickup_transform.translation.y += direction.y * speed * dt;
+            }
+        } else if dist < magnet_radius {
+            let direction = (player_pos - pickup_pos).normalize_or_zero();
+            pickup_transform.translation.x += direction.x * WEAPON_PICKUP_MAGNET_SPEED * dt;
+            pickup_transform.translation.y += direction.y * WEAPON_PICKUP_MAGNET_SPEED * dt;
+        }
 
         if dist < PLAYER_RADIUS + PICKUP_RADIUS {
             let kind = pickup.0;
@@ -561,6 +667,7 @@ pub fn spawn_weapon_pickups(
         WeaponKind::HolyWater => game_materials.pickup_holy_water.clone(),
         WeaponKind::UpDown => game_materials.pickup_updown.clone(),
         WeaponKind::Phiera => game_materials.pickup_phiera.clone(),
+        WeaponKind::Whip => game_materials.pickup_whip.clone(),
     };
 
     commands.spawn((

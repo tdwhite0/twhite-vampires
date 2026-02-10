@@ -1147,6 +1147,7 @@ pub fn weapon_slime_split_collision(
     debug: Res<DebugSettings>,
     game_meshes: Res<GameMeshes>,
     game_materials: Res<GameMaterials>,
+    mut stats: ResMut<GameStats>,
 ) {
     let dmg_mult = debug.damage_multiplier;
 
@@ -1159,6 +1160,7 @@ pub fn weapon_slime_split_collision(
             if proj_pos.distance(split_pos) < weapon_radii::PROJECTILE + SLIME_SPLIT_RADIUS {
                 let dmg = projectile.damage * dmg_mult;
                 split.health -= dmg;
+                stats.record_weapon_damage(projectile.source, dmg);
                 spawn_boss_damage_number(&mut commands, split_pos, dmg);
                 if projectile.piercing {
                     projectile.hit_enemies.push(split_entity);
@@ -1179,6 +1181,7 @@ pub fn weapon_slime_split_collision(
             if boom_pos.distance(split_pos) < weapon_radii::BOOMERANG + SLIME_SPLIT_RADIUS {
                 let dmg = boomerang.damage * dmg_mult;
                 split.health -= dmg;
+                stats.record_weapon_damage(WeaponKind::Boomerang, dmg);
                 spawn_boss_damage_number(&mut commands, split_pos, dmg);
                 boomerang.hit_enemies.push(split_entity);
             }
@@ -1277,9 +1280,14 @@ pub fn weapon_boss_collision(
         (&Transform, &mut UpDownWave),
         (Without<Boss>, Without<Player>, Without<OrbitShield>, Without<Projectile>, Without<BoomerangProjectile>, Without<BoneProjectile>),
     >,
+    mut whip_query: Query<
+        (&Transform, &mut WhipSlash),
+        (Without<Boss>, Without<Player>, Without<OrbitShield>, Without<Projectile>, Without<BoomerangProjectile>, Without<BoneProjectile>, Without<UpDownWave>),
+    >,
     mut boss_query: Query<(Entity, &Transform, &mut BossHealth, &Boss)>,
     weapons: Res<PlayerWeapons>,
     debug: Res<DebugSettings>,
+    mut stats: ResMut<GameStats>,
 ) {
     let dmg_mult = debug.damage_multiplier;
     let orbit_damage = weapons
@@ -1299,6 +1307,7 @@ pub fn weapon_boss_collision(
             let radius = boss_radius(boss.kind);
             if orbit_pos.distance(boss_pos) < weapon_radii::ORBIT_SHIELD + radius {
                 health.current -= orbit_damage;
+                stats.record_weapon_damage(WeaponKind::OrbitShield, orbit_damage);
                 orbit.hit_cooldown = 0.3;
                 spawn_boss_damage_number(&mut commands, boss_pos, orbit_damage);
                 break;
@@ -1316,6 +1325,7 @@ pub fn weapon_boss_collision(
             if proj_pos.distance(boss_pos) < weapon_radii::PROJECTILE + radius {
                 let dmg = projectile.damage * dmg_mult;
                 health.current -= dmg;
+                stats.record_weapon_damage(projectile.source, dmg);
                 spawn_boss_damage_number(&mut commands, boss_pos, dmg);
                 if projectile.piercing {
                     projectile.hit_enemies.push(boss_entity);
@@ -1337,6 +1347,7 @@ pub fn weapon_boss_collision(
             if boom_pos.distance(boss_pos) < weapon_radii::BOOMERANG + radius {
                 let dmg = boomerang.damage * dmg_mult;
                 health.current -= dmg;
+                stats.record_weapon_damage(WeaponKind::Boomerang, dmg);
                 spawn_boss_damage_number(&mut commands, boss_pos, dmg);
                 boomerang.hit_enemies.push(boss_entity);
             }
@@ -1369,8 +1380,31 @@ pub fn weapon_boss_collision(
             if wave_pos.distance(boss_pos) < weapon_radii::UPDOWN + radius {
                 let dmg = wave.damage * dmg_mult;
                 health.current -= dmg;
+                stats.record_weapon_damage(WeaponKind::UpDown, dmg);
                 spawn_boss_damage_number(&mut commands, boss_pos, dmg);
                 wave.hit_enemies.push(boss_entity);
+            }
+        }
+    }
+
+    for (slash_transform, mut slash) in whip_query.iter_mut() {
+        if slash.delay > 0.0 { continue; }
+        let slash_pos = slash_transform.translation.truncate();
+        for (boss_entity, boss_transform, mut health, boss) in boss_query.iter_mut() {
+            if health.current <= 0.0 { continue; }
+            if slash.hit_enemies.contains(&boss_entity) { continue; }
+            let boss_pos = boss_transform.translation.truncate();
+            let to_boss = boss_pos - slash_pos;
+            let local_x = to_boss.dot(slash.direction);
+            let perp = Vec2::new(-slash.direction.y, slash.direction.x);
+            let local_y = to_boss.dot(perp);
+            let radius = boss_radius(boss.kind);
+            if local_x.abs() < slash.half_length + radius && local_y.abs() < slash.half_width + radius {
+                let dmg = slash.damage * dmg_mult;
+                health.current -= dmg;
+                stats.record_weapon_damage(WeaponKind::Whip, dmg);
+                spawn_boss_damage_number(&mut commands, boss_pos, dmg);
+                slash.hit_enemies.push(boss_entity);
             }
         }
     }
@@ -1704,6 +1738,7 @@ pub fn holy_water_damages_boss(
     mut boss_query: Query<(&Transform, &mut BossHealth, &Boss)>,
     zone_query: Query<(&Transform, &HolyWaterZone)>,
     debug: Res<DebugSettings>,
+    mut stats: ResMut<GameStats>,
 ) {
     for (zone_transform, zone) in zone_query.iter() {
         let zone_pos = zone_transform.translation.truncate();
@@ -1715,6 +1750,7 @@ pub fn holy_water_damages_boss(
             if dist < zone.radius + radius {
                 let dmg = zone.damage * debug.damage_multiplier;
                 health.current -= dmg;
+                stats.record_weapon_damage(WeaponKind::HolyWater, dmg);
                 spawn_boss_damage_number(&mut commands, boss_pos, dmg);
             }
         }
@@ -1729,6 +1765,7 @@ pub fn flame_aura_damages_boss(
     player_query: Query<&Transform, With<Player>>,
     weapons: Res<PlayerWeapons>,
     debug: Res<DebugSettings>,
+    mut stats: ResMut<GameStats>,
 ) {
     let Some(flame) = weapons.get(WeaponKind::FlameAura) else {
         return;
@@ -1747,6 +1784,7 @@ pub fn flame_aura_damages_boss(
         if dist < flame.area + radius {
             let dmg = flame.damage * debug.damage_multiplier;
             health.current -= dmg;
+            stats.record_weapon_damage(WeaponKind::FlameAura, dmg);
             spawn_boss_damage_number(&mut commands, boss_pos, dmg);
         }
     }

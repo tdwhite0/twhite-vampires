@@ -112,6 +112,7 @@ pub fn projectile_burst_system(
                 direction,
                 piercing: level >= 5,
                 hit_enemies: Vec::new(),
+                source: WeaponKind::ProjectileBurst,
             },
             GameEntity,
         ));
@@ -147,6 +148,7 @@ pub fn lightning_zap_system(
     mut lightning_mats: ResMut<Assets<LightningMaterial>>,
     sound_assets: Res<SoundAssets>,
     debug: Res<DebugSettings>,
+    mut stats: ResMut<GameStats>,
 ) {
     let Ok(player_transform) = player_query.single() else {
         return;
@@ -203,6 +205,7 @@ pub fn lightning_zap_system(
         if let Ok((_, _, mut health)) = enemy_query.get_mut(*entity) {
             if health.0 > 0.0 {
                 health.0 -= damage;
+                stats.record_weapon_damage(WeaponKind::LightningZap, damage);
             }
         }
     }
@@ -254,6 +257,7 @@ pub fn flame_aura_system(
     time: Res<Time>,
     sound_assets: Res<SoundAssets>,
     debug: Res<DebugSettings>,
+    mut stats: ResMut<GameStats>,
 ) {
     let Ok(player_transform) = player_query.single() else {
         return;
@@ -276,6 +280,7 @@ pub fn flame_aura_system(
         let pos = transform.translation.truncate();
         if player_pos.distance(pos) < range {
             health.0 -= damage;
+            stats.record_weapon_damage(WeaponKind::FlameAura, damage);
         }
     }
 }
@@ -621,6 +626,7 @@ pub fn update_holy_water_zones(
     mut holy_water_mats: ResMut<Assets<HolyWaterMaterial>>,
     time: Res<Time>,
     debug: Res<DebugSettings>,
+    mut stats: ResMut<GameStats>,
 ) {
     let dt = time.delta_secs();
     let dmg_mult = debug.damage_multiplier;
@@ -656,6 +662,7 @@ pub fn update_holy_water_zones(
             let enemy_pos = enemy_transform.translation.truncate();
             if zone_pos.distance(enemy_pos) < radius {
                 health.0 -= damage;
+                stats.record_weapon_damage(WeaponKind::HolyWater, damage);
             }
         }
     }
@@ -827,9 +834,132 @@ pub fn phiera_system(
                     direction,
                     piercing: level >= 5,
                     hit_enemies: Vec::new(),
+                    source: WeaponKind::Phiera,
                 },
                 GameEntity,
             ));
+        }
+    }
+}
+
+// === Whip ===
+const WHIP_SLASH_LIFETIME: f32 = 0.3;
+const WHIP_SLASH_WIDTH: f32 = 60.0;
+const WHIP_SECOND_SLASH_DELAY: f32 = 0.1;
+
+pub fn whip_system(
+    mut commands: Commands,
+    mut weapons: ResMut<PlayerWeapons>,
+    player_query: Query<(&Transform, &Sprite), With<Player>>,
+    time: Res<Time>,
+    weapon_shaders: Res<WeaponShaderHandles>,
+    mut whip_mats: ResMut<Assets<WhipMaterial>>,
+    sound_assets: Res<SoundAssets>,
+) {
+    let Ok((player_transform, sprite)) = player_query.single() else {
+        return;
+    };
+    let Some(weapon) = weapons.get_mut(WeaponKind::Whip) else {
+        return;
+    };
+
+    if !weapon.tick_cooldown(time.delta_secs()) {
+        return;
+    }
+
+    let player_pos = player_transform.translation.truncate();
+    let damage = weapon.damage;
+    let half_length = weapon.area / 2.0;
+    let half_width = WHIP_SLASH_WIDTH / 2.0;
+    let vis = WeaponKind::Whip.visual_def(weapon.level);
+
+    // Horizontal direction based on sprite facing: flip_x=true means facing left
+    let facing_dir = if sprite.flip_x { Vec2::NEG_X } else { Vec2::X };
+
+    play_sound(&mut commands, &sound_assets.weapon_projectile, 0.10);
+
+    // Always fire forward + backward. Forward fires immediately, backward after a short delay.
+    for i in 0..2u32 {
+        let dir = if i == 0 { facing_dir } else { -facing_dir };
+        let delay = if i == 0 { 0.0 } else { WHIP_SECOND_SLASH_DELAY };
+
+        let slash_center = player_pos + dir * half_length;
+
+        let mat = whip_mats.add(WhipMaterial {
+            data: WhipData {
+                color: Vec4::from_array(vis.color),
+                intensity: vis.intensity,
+                lifetime_frac: if delay > 0.0 { 0.0 } else { 1.0 },
+                _pad1: 0.0,
+                _pad2: 0.0,
+            },
+        });
+
+        commands.spawn((
+            Mesh2d(weapon_shaders.whip_quad.clone()),
+            MeshMaterial2d(mat),
+            Transform::from_translation(slash_center.extend(9.0))
+                .with_scale(Vec3::new(half_length * 2.0 * dir.x.signum(), half_width * 2.0, 1.0)),
+            WhipSlash {
+                damage,
+                lifetime: WHIP_SLASH_LIFETIME,
+                max_lifetime: WHIP_SLASH_LIFETIME,
+                delay,
+                direction: dir,
+                half_length,
+                half_width,
+                hit_enemies: Vec::new(),
+            },
+            GameEntity,
+        ));
+    }
+}
+
+pub fn update_whip_slashes(
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut Transform, &mut WhipSlash, &MeshMaterial2d<WhipMaterial>), Without<Player>>,
+    player_query: Query<&Transform, With<Player>>,
+    mut whip_mats: ResMut<Assets<WhipMaterial>>,
+    time: Res<Time>,
+) {
+    let dt = time.delta_secs();
+    let player_pos = player_query
+        .single()
+        .map(|t| t.translation.truncate())
+        .unwrap_or(Vec2::ZERO);
+
+    for (entity, mut transform, mut slash, mat_handle) in query.iter_mut() {
+        // Handle delay: count down before becoming active
+        if slash.delay > 0.0 {
+            slash.delay -= dt;
+            if slash.delay > 0.0 {
+                // Still waiting -- keep following player but stay invisible
+                let slash_center = player_pos + slash.direction * slash.half_length;
+                transform.translation.x = slash_center.x;
+                transform.translation.y = slash_center.y;
+                continue;
+            }
+            // Delay just ended -- activate the slash
+            if let Some(mat) = whip_mats.get_mut(mat_handle.id()) {
+                mat.data.lifetime_frac = 1.0;
+            }
+        }
+
+        slash.lifetime -= dt;
+        if slash.lifetime <= 0.0 {
+            commands.entity(entity).despawn();
+            continue;
+        }
+
+        // Follow the player
+        let slash_center = player_pos + slash.direction * slash.half_length;
+        transform.translation.x = slash_center.x;
+        transform.translation.y = slash_center.y;
+
+        // Update shader lifetime for fade-out
+        let frac = (slash.lifetime / slash.max_lifetime).clamp(0.0, 1.0);
+        if let Some(mat) = whip_mats.get_mut(mat_handle.id()) {
+            mat.data.lifetime_frac = frac;
         }
     }
 }

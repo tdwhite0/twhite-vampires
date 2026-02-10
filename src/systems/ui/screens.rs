@@ -4,8 +4,26 @@ use crate::components::*;
 use crate::resources::*;
 use crate::systems::startup;
 
+const CHAR_BOX_SIZE: f32 = 140.0;
+const CHAR_BOX_HEIGHT: f32 = 170.0;
+
 // === Title Screen ===
-pub fn spawn_title_screen(mut commands: Commands) {
+pub fn spawn_title_screen(
+    mut commands: Commands,
+    selected: Res<SelectedCharacter>,
+    sprites: Option<Res<SpriteAssets>>,
+    existing: Query<Entity, With<TitleScreenEntity>>,
+) {
+    // SpriteAssets may not exist yet on first OnEnter (commands from Startup
+    // haven't flushed). This system also runs each frame in Update so it
+    // will create the screen as soon as assets are ready.
+    let Some(sprites) = sprites else {
+        return;
+    };
+    // Don't respawn if title screen already exists
+    if !existing.is_empty() {
+        return;
+    }
     commands
         .spawn((
             Node {
@@ -20,6 +38,7 @@ pub fn spawn_title_screen(mut commands: Commands) {
             TitleScreenEntity,
         ))
         .with_children(|parent| {
+            // Title
             parent.spawn((
                 Text::new("SURVIVOR ARENA"),
                 TextFont {
@@ -40,30 +59,125 @@ pub fn spawn_title_screen(mut commands: Commands) {
                     ..default()
                 },
             ));
+
+            // "Choose your character" label
             parent.spawn((
-                Text::new("WASD to move  |  Survive as long as you can"),
+                Text::new("Choose your character"),
                 TextFont {
-                    font_size: 18.0,
+                    font_size: 22.0,
                     ..default()
                 },
-                TextColor(Color::srgb(0.6, 0.6, 0.7)),
+                TextColor(Color::srgb(0.8, 0.8, 0.9)),
                 Node {
-                    margin: UiRect::top(Val::Px(40.0)),
+                    margin: UiRect::top(Val::Px(30.0)),
                     ..default()
                 },
             ));
+
+            // Character selection row
+            parent
+                .spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(20.0),
+                    margin: UiRect::top(Val::Px(16.0)),
+                    ..default()
+                })
+                .with_children(|row| {
+                    for (i, kind) in CharacterKind::ALL.iter().enumerate() {
+                        let is_selected = *kind == selected.0;
+                        let border_color = if is_selected {
+                            kind.border_color()
+                        } else {
+                            Color::srgb(0.3, 0.3, 0.4)
+                        };
+                        let bg_alpha = if is_selected { 0.3 } else { 0.1 };
+
+                        let (texture, layout) = kind.sprite_info(&sprites);
+                        let preview_index = kind.preview_index();
+
+                        row.spawn((
+                            Button,
+                            Node {
+                                width: Val::Px(CHAR_BOX_SIZE),
+                                height: Val::Px(CHAR_BOX_HEIGHT),
+                                flex_direction: FlexDirection::Column,
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(3.0)),
+                                padding: UiRect::all(Val::Px(8.0)),
+                                ..default()
+                            },
+                            BorderColor::all(border_color),
+                            BackgroundColor(Color::srgba(0.1, 0.1, 0.2, bg_alpha)),
+                            CharacterSelectBox(i),
+                        ))
+                        .with_children(|card| {
+                            // Character sprite preview
+                            card.spawn((
+                                ImageNode {
+                                    image: texture,
+                                    texture_atlas: Some(TextureAtlas {
+                                        layout,
+                                        index: preview_index,
+                                    }),
+                                    ..default()
+                                },
+                                Node {
+                                    width: Val::Px(64.0),
+                                    height: Val::Px(64.0),
+                                    margin: UiRect::bottom(Val::Px(8.0)),
+                                    ..default()
+                                },
+                            ));
+
+                            // Character name
+                            card.spawn((
+                                Text::new(kind.display_name()),
+                                TextFont {
+                                    font_size: 18.0,
+                                    ..default()
+                                },
+                                TextColor(if is_selected {
+                                    Color::WHITE
+                                } else {
+                                    Color::srgb(0.6, 0.6, 0.7)
+                                }),
+                            ));
+
+                            // Character description
+                            card.spawn((
+                                Text::new(kind.description()),
+                                TextFont {
+                                    font_size: 12.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.5, 0.5, 0.6)),
+                                Node {
+                                    margin: UiRect::top(Val::Px(4.0)),
+                                    ..default()
+                                },
+                            ));
+                        });
+                    }
+                });
+
+            // Navigation hint
             parent.spawn((
-                Text::new("Pick up weapons  |  Level up to upgrade"),
+                Text::new("A/D or Click to select"),
                 TextFont {
-                    font_size: 18.0,
+                    font_size: 14.0,
                     ..default()
                 },
-                TextColor(Color::srgb(0.6, 0.6, 0.7)),
+                TextColor(Color::srgb(0.5, 0.5, 0.6)),
                 Node {
-                    margin: UiRect::top(Val::Px(8.0)),
+                    margin: UiRect::top(Val::Px(12.0)),
                     ..default()
                 },
             ));
+
+            // Start prompt
             parent.spawn((
                 Text::new("Press SPACE to Start"),
                 TextFont {
@@ -72,7 +186,7 @@ pub fn spawn_title_screen(mut commands: Commands) {
                 },
                 TextColor(Color::srgb(1.0, 1.0, 0.3)),
                 Node {
-                    margin: UiRect::top(Val::Px(60.0)),
+                    margin: UiRect::top(Val::Px(24.0)),
                     ..default()
                 },
             ));
@@ -94,7 +208,58 @@ pub fn handle_title_input(
     mut next_state: ResMut<NextState<GameState>>,
     mut needs_init: ResMut<NeedsGameInit>,
     sound_assets: Res<SoundAssets>,
+    mut selected: ResMut<SelectedCharacter>,
+    mut box_query: Query<(&CharacterSelectBox, &mut BorderColor, &mut BackgroundColor, &Interaction, &Children)>,
+    mut text_query: Query<&mut TextColor>,
 ) {
+    let all = CharacterKind::ALL;
+    let current_idx = all.iter().position(|k| *k == selected.0).unwrap_or(0);
+
+    // Keyboard cycling
+    let mut new_idx = None;
+    if keys.just_pressed(KeyCode::KeyD) || keys.just_pressed(KeyCode::ArrowRight) {
+        new_idx = Some((current_idx + 1) % all.len());
+    }
+    if keys.just_pressed(KeyCode::KeyA) || keys.just_pressed(KeyCode::ArrowLeft) {
+        new_idx = Some((current_idx + all.len() - 1) % all.len());
+    }
+
+    // Mouse click selection
+    for (select_box, _, _, interaction, _) in box_query.iter() {
+        if *interaction == Interaction::Pressed {
+            new_idx = Some(select_box.0);
+        }
+    }
+
+    if let Some(idx) = new_idx {
+        selected.0 = all[idx];
+
+        // Update visual state of all boxes
+        for (select_box, mut border, mut bg, _, children) in box_query.iter_mut() {
+            let kind = all[select_box.0];
+            let is_sel = select_box.0 == idx;
+            *border = BorderColor::all(if is_sel {
+                kind.border_color()
+            } else {
+                Color::srgb(0.3, 0.3, 0.4)
+            });
+            *bg = BackgroundColor(Color::srgba(0.1, 0.1, 0.2, if is_sel { 0.3 } else { 0.1 }));
+
+            // Update name text color (first text child with font_size >= 18)
+            for child in children.iter() {
+                if let Ok(mut tc) = text_query.get_mut(child) {
+                    // Update all text children - name gets bright, desc stays dim
+                    tc.0 = if is_sel {
+                        Color::WHITE
+                    } else {
+                        Color::srgb(0.6, 0.6, 0.7)
+                    };
+                }
+            }
+        }
+    }
+
+    // Start game
     if keys.just_pressed(KeyCode::Space) {
         needs_init.0 = true;
         next_state.set(GameState::Playing);
@@ -194,50 +359,55 @@ pub fn spawn_game_over_screen(
                     });
             }
 
-            // Weapons row
+            // Per-weapon damage rows
             if !weapons.weapons.is_empty() {
-                parent
-                    .spawn((
-                        Node {
-                            width: Val::Px(420.0),
-                            flex_direction: FlexDirection::Row,
-                            flex_wrap: FlexWrap::Wrap,
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            margin: UiRect::top(Val::Px(16.0)),
-                            padding: UiRect::horizontal(Val::Px(12.0)),
-                            column_gap: Val::Px(12.0),
-                            row_gap: Val::Px(4.0),
-                            ..default()
-                        },
-                        GameOverStatRow(8),
-                    ))
-                    .with_children(|row| {
-                        row.spawn((
-                            Text::new("Weapons:"),
-                            TextFont {
-                                font_size: 18.0,
+                // Sort weapons by damage dealt (highest first)
+                let mut weapon_damages: Vec<_> = weapons.weapons.iter().map(|w| {
+                    let dmg = stats.weapon_damage.get(&w.kind).copied().unwrap_or(0.0);
+                    (w.kind, w.level, dmg)
+                }).collect();
+                weapon_damages.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+
+                let base_row = stat_rows.len() as u32 + 1;
+                for (i, (kind, level, dmg)) in weapon_damages.iter().enumerate() {
+                    let color = kind.color().with_alpha(0.0);
+                    parent
+                        .spawn((
+                            Node {
+                                width: Val::Px(420.0),
+                                justify_content: JustifyContent::SpaceBetween,
+                                align_items: AlignItems::Center,
+                                flex_direction: FlexDirection::Row,
+                                margin: UiRect::vertical(Val::Px(3.0)),
+                                padding: UiRect::horizontal(Val::Px(12.0)),
                                 ..default()
                             },
-                            TextColor(Color::srgba(0.6, 0.6, 0.7, 0.0)),
-                        ));
-                        for weapon in weapons.weapons.iter() {
-                            let color = weapon.kind.color().with_alpha(0.0);
+                            GameOverStatRow(base_row + i as u32),
+                        ))
+                        .with_children(|row| {
                             row.spawn((
-                                Text::new(format!("{} Lv.{}", weapon.kind.display_name(), weapon.level)),
+                                Text::new(format!("{} Lv.{}", kind.display_name(), level)),
                                 TextFont {
                                     font_size: 18.0,
                                     ..default()
                                 },
                                 TextColor(color),
                             ));
-                        }
-                    });
+                            row.spawn((
+                                Text::new(format!("{}", *dmg as u32)),
+                                TextFont {
+                                    font_size: 18.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgba(1.0, 1.0, 1.0, 0.0)),
+                            ));
+                        });
+                }
             }
 
             // Restart prompt
             parent.spawn((
-                Text::new("Press SPACE to Restart"),
+                Text::new("Press SPACE to Continue"),
                 TextFont {
                     font_size: 28.0,
                     ..default()
@@ -305,11 +475,9 @@ pub fn animate_game_over_screen(
 pub fn handle_game_over_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut next_state: ResMut<NextState<GameState>>,
-    mut needs_init: ResMut<NeedsGameInit>,
 ) {
     if keys.just_pressed(KeyCode::Space) {
-        needs_init.0 = true;
-        next_state.set(GameState::Playing);
+        next_state.set(GameState::Title);
     }
 }
 

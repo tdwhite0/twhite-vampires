@@ -25,6 +25,8 @@ pub fn setup_camera(mut commands: Commands) {
             scanline_intensity: 0.25,
             phosphor_intensity: 0.25,
             vignette_strength: 1.8,
+            _padding1: 0.0,
+            _padding2: 0.0,
         },
     ));
 
@@ -60,11 +62,34 @@ pub fn setup_assets(
     mut xp_bar_mats: ResMut<Assets<XpBarMaterial>>,
 ) {
     // Load sprite sheets
-    let hero_texture: Handle<Image> = asset_server.load("textures/hero.png");
-    // Hero: 160x192, 4 cols x 3 rows, each frame 40x64
+    let hero_texture: Handle<Image> = asset_server.load("textures/warrior.png");
+    // Warrior: 896x1600, 14 cols x 25 rows, each frame 64x64
+    // Row layout (with sword): move-right=3, move-front=9, move-left=15, move-back=21
     let hero_layout = atlas_layouts.add(TextureAtlasLayout::from_grid(
-        UVec2::new(40, 64),
-        4,
+        UVec2::new(64, 64),
+        14,
+        25,
+        None,
+        None,
+    ));
+
+    // Robot: 7 cols x 3 rows, 64x64 per frame
+    // Row 0=side(right), Row 1=front(down), Row 2=back(up)
+    let robot_texture: Handle<Image> = asset_server.load("textures/robot.png");
+    let robot_layout = atlas_layouts.add(TextureAtlasLayout::from_grid(
+        UVec2::new(64, 64),
+        7,
+        3,
+        None,
+        None,
+    ));
+
+    // Mage: 7 cols x 3 rows, 64x64 per frame
+    // Row 0=side(right), Row 1=front(down), Row 2=back(up)
+    let mage_texture: Handle<Image> = asset_server.load("textures/mage.png");
+    let mage_layout = atlas_layouts.add(TextureAtlasLayout::from_grid(
+        UVec2::new(64, 64),
+        7,
         3,
         None,
         None,
@@ -93,6 +118,10 @@ pub fn setup_assets(
     commands.insert_resource(SpriteAssets {
         hero_texture,
         hero_layout,
+        robot_texture,
+        robot_layout,
+        mage_texture,
+        mage_layout,
         creatures_texture,
         creatures_layout,
         dog_texture,
@@ -124,6 +153,7 @@ pub fn setup_assets(
         enemy_fast: meshes.add(Circle::new(8.0)),
         enemy_tank: meshes.add(Rectangle::new(24.0, 24.0)),
         enemy_swarm: meshes.add(Circle::new(5.0)),
+        enemy_flock: meshes.add(Circle::new(6.0)),
         projectile: meshes.add(Circle::new(4.0)),
         xp_gem: meshes.add(Rectangle::new(6.0, 6.0)),
         orbit_shield: meshes.add(Circle::new(8.0)),
@@ -139,6 +169,7 @@ pub fn setup_assets(
         enemy_fast: materials.add(Color::srgb(1.0, 0.9, 0.2)),
         enemy_tank: materials.add(Color::srgb(0.6, 0.1, 0.1)),
         enemy_swarm: materials.add(Color::srgb(1.0, 0.4, 0.7)),
+        enemy_flock: materials.add(Color::srgb(0.4, 0.8, 0.6)),
         projectile: materials.add(Color::srgb(0.9, 0.9, 1.0)),
         xp_gem: materials.add(Color::srgb(0.2, 1.0, 0.3)),
         orbit_shield: materials.add(Color::srgb(0.0, 0.9, 0.9)),
@@ -151,6 +182,7 @@ pub fn setup_assets(
         pickup_holy_water: materials.add(Color::srgb(0.2, 0.9, 0.7)),
         pickup_updown: materials.add(Color::srgb(0.8, 0.2, 0.9)),
         pickup_phiera: materials.add(Color::srgb(1.0, 0.3, 0.1)),
+        pickup_whip: materials.add(Color::srgb(0.9, 0.35, 0.15)),
         healing_dot: materials.add(Color::srgb(0.3, 0.6, 1.0)),
     };
 
@@ -263,6 +295,7 @@ pub fn setup_assets(
         holy_water_quad: meshes.add(Rectangle::new(1.0, 1.0)),
         updown_quad: meshes.add(Rectangle::new(1.0, 1.0)),
         phiera_quad: meshes.add(Rectangle::new(16.0, 16.0)),
+        whip_quad: meshes.add(Rectangle::new(1.0, 1.0)),
         boss_laser_quad: meshes.add(Rectangle::new(800.0, 80.0)),
     };
     commands.insert_resource(weapon_shaders);
@@ -326,6 +359,7 @@ pub fn on_enter_playing(
     sprites: Res<SpriteAssets>,
     weapon_shaders: Res<WeaponShaderHandles>,
     hud_bars: Res<HudBarHandles>,
+    selected_char: Res<SelectedCharacter>,
 ) {
     if !needs_init.0 {
         return;
@@ -347,18 +381,22 @@ pub fn on_enter_playing(
     abilities.abilities.clear();
     abilities.abilities.push(ActiveAbility::new(AbilityKind::Dash));
 
-    // Spawn player with hero sprite
-    // Hero sprite: row 0 = front-facing walk, frames 0-3
+    // Spawn player with selected character sprite
+    let char_kind = selected_char.0;
+    let (texture, layout) = char_kind.sprite_info(&sprites);
+    let anim_config = char_kind.anim_config();
+    let front_start = anim_config.row_front * anim_config.cols;
+    let front_end = front_start + anim_config.frame_count - 1;
     commands.spawn((
         Sprite::from_atlas_image(
-            sprites.hero_texture.clone(),
+            texture,
             TextureAtlas {
-                layout: sprites.hero_layout.clone(),
-                index: 0,
+                layout,
+                index: front_start,
             },
         ),
         Transform::from_translation(Vec3::new(0.0, 0.0, 10.0))
-            .with_scale(Vec3::splat(0.75)),
+            .with_scale(Vec3::splat(1.5)),
         Player,
         Health {
             current: PLAYER_MAX_HEALTH,
@@ -371,8 +409,9 @@ pub fn on_enter_playing(
             level: 1,
         },
         MoveSpeed(PLAYER_SPEED),
-        AnimationIndices { first: 0, last: 3 },
+        AnimationIndices { first: front_start, last: front_end },
         AnimationTimer(Timer::from_seconds(0.15, TimerMode::Repeating)),
+        anim_config,
         GameEntity,
     ));
 

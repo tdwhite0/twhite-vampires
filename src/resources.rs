@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::image::TextureAtlasLayout;
+use std::collections::HashMap;
 use crate::components::*;
 
 // === Sound Assets ===
@@ -137,7 +138,7 @@ impl AbilityKind {
 
     pub fn keybind_label(&self) -> &str {
         match self {
-            AbilityKind::Dash => "Space",
+            AbilityKind::Dash => "Click",
         }
     }
 
@@ -209,6 +210,11 @@ pub struct DebugSettings {
     pub invincible: bool,
     pub damage_multiplier: f32,
     pub crt_enabled: bool,
+    pub crt_curvature: f32,
+    pub crt_chromatic_aberration: f32,
+    pub crt_scanline_intensity: f32,
+    pub crt_phosphor_intensity: f32,
+    pub crt_vignette_strength: f32,
     pub show_boss_hitboxes: bool,
     pub settings_tab: SettingsTab,
     pub spawn_rate_multiplier: f32,
@@ -244,6 +250,11 @@ impl Default for DebugSettings {
             invincible: false,
             damage_multiplier: 1.0,
             crt_enabled: true,
+            crt_curvature: 0.15,
+            crt_chromatic_aberration: 0.003,
+            crt_scanline_intensity: 0.25,
+            crt_phosphor_intensity: 0.25,
+            crt_vignette_strength: 1.8,
             show_boss_hitboxes: false,
             settings_tab: SettingsTab::default(),
             spawn_rate_multiplier: 1.0,
@@ -311,6 +322,13 @@ pub struct GameStats {
     pub xp_collected: f32,
     pub damage_taken: f32,
     pub heals_collected: u32,
+    pub weapon_damage: HashMap<WeaponKind, f32>,
+}
+
+impl GameStats {
+    pub fn record_weapon_damage(&mut self, kind: WeaponKind, amount: f32) {
+        *self.weapon_damage.entry(kind).or_insert(0.0) += amount;
+    }
 }
 
 // === Pickup Spawning ===
@@ -390,11 +408,108 @@ pub struct BossAssets {
     pub eye_layout: Handle<TextureAtlasLayout>,
 }
 
+// === Character Selection ===
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum CharacterKind {
+    #[default]
+    Warrior,
+    Robot,
+    Mage,
+}
+
+impl CharacterKind {
+    pub const ALL: [CharacterKind; 3] = [
+        CharacterKind::Warrior,
+        CharacterKind::Robot,
+        CharacterKind::Mage,
+    ];
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            CharacterKind::Warrior => "Warrior",
+            CharacterKind::Robot => "Robot",
+            CharacterKind::Mage => "Mage",
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            CharacterKind::Warrior => "Sword-wielding fighter",
+            CharacterKind::Robot => "Chrome machine of war",
+            CharacterKind::Mage => "Arcane spellcaster",
+        }
+    }
+
+    pub fn border_color(&self) -> Color {
+        match self {
+            CharacterKind::Warrior => Color::srgb(1.0, 0.6, 0.2),
+            CharacterKind::Robot => Color::srgb(0.3, 0.8, 1.0),
+            CharacterKind::Mage => Color::srgb(0.7, 0.3, 1.0),
+        }
+    }
+
+    /// Returns (texture, layout) keys into SpriteAssets
+    pub fn sprite_info(&self, sprites: &SpriteAssets) -> (Handle<Image>, Handle<TextureAtlasLayout>) {
+        match self {
+            CharacterKind::Warrior => (sprites.hero_texture.clone(), sprites.hero_layout.clone()),
+            CharacterKind::Robot => (sprites.robot_texture.clone(), sprites.robot_layout.clone()),
+            CharacterKind::Mage => (sprites.mage_texture.clone(), sprites.mage_layout.clone()),
+        }
+    }
+
+    /// Returns animation config for this character.
+    /// (row_front, row_back, row_side, frame_count, cols_per_row)
+    pub fn anim_config(&self) -> CharacterAnimConfig {
+        match self {
+            CharacterKind::Warrior => CharacterAnimConfig {
+                // Warrior: 14 cols x 25 rows, 64x64
+                // Move-with-sword: front=row9, right=row3, back=row21
+                cols: 14,
+                row_front: 9,
+                row_back: 21,
+                row_side: 3,
+                frame_count: 7,
+            },
+            CharacterKind::Robot => CharacterAnimConfig {
+                // Robot: 7 cols x 3 rows, 64x64
+                // row0=side, row1=front, row2=back
+                cols: 7,
+                row_front: 1,
+                row_back: 2,
+                row_side: 0,
+                frame_count: 7,
+            },
+            CharacterKind::Mage => CharacterAnimConfig {
+                // Mage: 7 cols x 3 rows, 64x64
+                // row0=side, row1=front, row2=back
+                cols: 7,
+                row_front: 1,
+                row_back: 2,
+                row_side: 0,
+                frame_count: 7,
+            },
+        }
+    }
+
+    /// Returns the default atlas index (front-facing first frame) for preview
+    pub fn preview_index(&self) -> usize {
+        let config = self.anim_config();
+        config.row_front * config.cols
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct SelectedCharacter(pub CharacterKind);
+
 // === Sprite Assets ===
 #[derive(Resource)]
 pub struct SpriteAssets {
     pub hero_texture: Handle<Image>,
     pub hero_layout: Handle<TextureAtlasLayout>,
+    pub robot_texture: Handle<Image>,
+    pub robot_layout: Handle<TextureAtlasLayout>,
+    pub mage_texture: Handle<Image>,
+    pub mage_layout: Handle<TextureAtlasLayout>,
     pub creatures_texture: Handle<Image>,
     pub creatures_layout: Handle<TextureAtlasLayout>,
     pub dog_texture: Handle<Image>,
@@ -424,6 +539,7 @@ pub struct WeaponShaderHandles {
     pub holy_water_quad: Handle<Mesh>,
     pub updown_quad: Handle<Mesh>,
     pub phiera_quad: Handle<Mesh>,
+    pub whip_quad: Handle<Mesh>,
     pub boss_laser_quad: Handle<Mesh>,
 }
 
@@ -449,6 +565,7 @@ pub struct GameMeshes {
     pub enemy_fast: Handle<Mesh>,
     pub enemy_tank: Handle<Mesh>,
     pub enemy_swarm: Handle<Mesh>,
+    pub enemy_flock: Handle<Mesh>,
     pub projectile: Handle<Mesh>,
     pub xp_gem: Handle<Mesh>,
     pub orbit_shield: Handle<Mesh>,
@@ -466,6 +583,7 @@ pub struct GameMaterials {
     pub enemy_fast: Handle<ColorMaterial>,
     pub enemy_tank: Handle<ColorMaterial>,
     pub enemy_swarm: Handle<ColorMaterial>,
+    pub enemy_flock: Handle<ColorMaterial>,
     pub projectile: Handle<ColorMaterial>,
     pub xp_gem: Handle<ColorMaterial>,
     pub orbit_shield: Handle<ColorMaterial>,
@@ -478,5 +596,6 @@ pub struct GameMaterials {
     pub pickup_holy_water: Handle<ColorMaterial>,
     pub pickup_updown: Handle<ColorMaterial>,
     pub pickup_phiera: Handle<ColorMaterial>,
+    pub pickup_whip: Handle<ColorMaterial>,
     pub healing_dot: Handle<ColorMaterial>,
 }

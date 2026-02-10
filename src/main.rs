@@ -13,11 +13,14 @@ use systems::shader_materials::*;
 
 fn main() {
     App::new()
+        .set_error_handler(bevy::ecs::error::warn)
         .add_plugins(DefaultPlugins
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "Survivor Arena".into(),
                     resolution: (1280, 720).into(),
+                    #[cfg(target_arch = "wasm32")]
+                    canvas: Some("#game-canvas".into()),
                     ..default()
                 }),
                 ..default()
@@ -33,6 +36,7 @@ fn main() {
         .add_plugins(Material2dPlugin::<HolyWaterMaterial>::default())
         .add_plugins(Material2dPlugin::<UpDownMaterial>::default())
         .add_plugins(Material2dPlugin::<PhieraMaterial>::default())
+        .add_plugins(Material2dPlugin::<WhipMaterial>::default())
         .add_plugins(Material2dPlugin::<BossLaserMaterial>::default())
         .add_plugins(Material2dPlugin::<HealthBarMaterial>::default())
         .add_plugins(Material2dPlugin::<XpBarMaterial>::default())
@@ -51,6 +55,8 @@ fn main() {
         .init_resource::<BossSpawnTimer>()
         .init_resource::<DebugSettings>()
         .init_resource::<PickupRange>()
+        .init_resource::<SelectedCharacter>()
+        .init_resource::<systems::enemies::FlockIdCounter>()
         .add_message::<NotificationEvent>()
         // Startup
         .add_systems(Startup, (
@@ -79,10 +85,10 @@ fn main() {
         .add_systems(OnExit(GameState::GameOver), systems::startup::cleanup_game)
         .add_systems(OnExit(GameState::Playing), systems::ui::despawn_settings_ui)
         // Title state
-        .add_systems(Update,
-            systems::ui::handle_title_input
-                .run_if(in_state(GameState::Title))
-        )
+        .add_systems(Update, (
+            systems::ui::spawn_title_screen,
+            systems::ui::handle_title_input,
+        ).run_if(in_state(GameState::Title)))
         // Playing state - split into groups to stay under tuple limit
         .add_systems(Update, (
             systems::player::player_movement,
@@ -113,6 +119,8 @@ fn main() {
             systems::weapons::manage_flame_aura_entity,
             systems::weapons::update_lightning_bolt_entities,
             systems::weapons::update_updown_waves,
+            systems::weapons::whip_system,
+            systems::weapons::update_whip_slashes,
             systems::combat::player_enemy_collision,
             systems::combat::dash_enemy_collision,
             systems::combat::weapon_enemy_collision,
@@ -151,6 +159,11 @@ fn main() {
             systems::ui::update_ability_cooldown_flash,
             systems::ui::update_shader_bars,
         ).run_if(in_state(GameState::Playing)))
+        // Flock enemy systems
+        .add_systems(Update, (
+            systems::enemies::flock_spawning,
+            systems::enemies::flock_movement,
+        ).run_if(in_state(GameState::Playing)))
         // New boss attack systems
         .add_systems(Update, (
             systems::boss::dragon_breath_attack,
@@ -188,6 +201,7 @@ fn main() {
             systems::ui::handle_settings_spawn_boss,
             systems::ui::handle_settings_boss_hitboxes,
             systems::ui::handle_spawn_rate_slider,
+            systems::ui::handle_crt_sliders,
             systems::ui::settings_button_hover,
             systems::audio::handle_music_track_selection,
             systems::audio::handle_music_mute,

@@ -33,6 +33,12 @@ pub enum EnemyKind {
     Fast,
     Tank,
     Swarm,
+    Flock,
+}
+
+#[derive(Component)]
+pub struct FlockMember {
+    pub flock_id: u32,
 }
 
 #[derive(Component)]
@@ -143,6 +149,17 @@ pub const PHIERA_LEVELS: [WeaponLevelDef; 8] = [
     WeaponLevelDef { damage: 35.0, cooldown: 0.12, area: 0.0, count: 4 },
 ];
 
+pub const WHIP_LEVELS: [WeaponLevelDef; 8] = [
+    WeaponLevelDef { damage: 10.0, cooldown: 1.35, area: 150.0, count: 1 },
+    WeaponLevelDef { damage: 13.0, cooldown: 1.35, area: 150.0, count: 2 },
+    WeaponLevelDef { damage: 17.0, cooldown: 1.25, area: 165.0, count: 2 },
+    WeaponLevelDef { damage: 20.0, cooldown: 1.25, area: 180.0, count: 2 },
+    WeaponLevelDef { damage: 25.0, cooldown: 1.15, area: 180.0, count: 2 },
+    WeaponLevelDef { damage: 30.0, cooldown: 1.15, area: 195.0, count: 2 },
+    WeaponLevelDef { damage: 35.0, cooldown: 1.05, area: 195.0, count: 2 },
+    WeaponLevelDef { damage: 40.0, cooldown: 1.05, area: 210.0, count: 2 },
+];
+
 // === Weapon Visual Tables ===
 pub struct WeaponVisualDef {
     pub color: [f32; 4],
@@ -237,6 +254,17 @@ pub const PHIERA_VISUALS: [WeaponVisualDef; 8] = [
     WeaponVisualDef { color: [1.000, 0.600, 0.350, 1.0], intensity: 3.200 },
 ];
 
+pub const WHIP_VISUALS: [WeaponVisualDef; 8] = [
+    WeaponVisualDef { color: [0.900, 0.350, 0.150, 1.0], intensity: 1.500 },
+    WeaponVisualDef { color: [0.920, 0.380, 0.170, 1.0], intensity: 1.700 },
+    WeaponVisualDef { color: [0.940, 0.410, 0.190, 1.0], intensity: 1.900 },
+    WeaponVisualDef { color: [0.950, 0.440, 0.210, 1.0], intensity: 2.100 },
+    WeaponVisualDef { color: [0.960, 0.480, 0.230, 1.0], intensity: 2.300 },
+    WeaponVisualDef { color: [0.970, 0.520, 0.260, 1.0], intensity: 2.600 },
+    WeaponVisualDef { color: [0.980, 0.560, 0.290, 1.0], intensity: 2.900 },
+    WeaponVisualDef { color: [1.000, 0.620, 0.330, 1.0], intensity: 3.200 },
+];
+
 // === Weapons ===
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WeaponKind {
@@ -248,6 +276,7 @@ pub enum WeaponKind {
     HolyWater,
     UpDown,
     Phiera,
+    Whip,
 }
 
 impl WeaponKind {
@@ -262,6 +291,7 @@ impl WeaponKind {
             WeaponKind::HolyWater => &HOLY_WATER_LEVELS[idx],
             WeaponKind::UpDown => &UPDOWN_LEVELS[idx],
             WeaponKind::Phiera => &PHIERA_LEVELS[idx],
+            WeaponKind::Whip => &WHIP_LEVELS[idx],
         }
     }
 
@@ -276,6 +306,7 @@ impl WeaponKind {
             WeaponKind::HolyWater => &HOLY_WATER_VISUALS[idx],
             WeaponKind::UpDown => &UPDOWN_VISUALS[idx],
             WeaponKind::Phiera => &PHIERA_VISUALS[idx],
+            WeaponKind::Whip => &WHIP_VISUALS[idx],
         }
     }
 
@@ -289,6 +320,7 @@ impl WeaponKind {
             WeaponKind::HolyWater,
             WeaponKind::UpDown,
             WeaponKind::Phiera,
+            WeaponKind::Whip,
         ]
     }
 
@@ -302,6 +334,7 @@ impl WeaponKind {
             WeaponKind::HolyWater => "Holy Water",
             WeaponKind::UpDown => "UpDown",
             WeaponKind::Phiera => "Phiera Der Tuphello",
+            WeaponKind::Whip => "Whip",
         }
     }
 
@@ -315,6 +348,7 @@ impl WeaponKind {
             WeaponKind::HolyWater => Color::srgb(0.2, 0.9, 0.7),
             WeaponKind::UpDown => Color::srgb(0.8, 0.2, 0.9),
             WeaponKind::Phiera => Color::srgb(1.0, 0.3, 0.1),
+            WeaponKind::Whip => Color::srgb(0.9, 0.35, 0.15),
         }
     }
 }
@@ -333,6 +367,7 @@ pub struct Projectile {
     pub direction: Vec2,
     pub piercing: bool,
     pub hit_enemies: Vec<Entity>,
+    pub source: WeaponKind,
 }
 
 #[derive(Component)]
@@ -386,6 +421,19 @@ pub struct UpDownWave {
     pub max_lifetime: f32,
     pub direction: f32, // 1.0 = up, -1.0 = down
     pub speed: f32,
+    pub hit_enemies: Vec<Entity>,
+}
+
+// === Whip Slash ===
+#[derive(Component)]
+pub struct WhipSlash {
+    pub damage: f32,
+    pub lifetime: f32,
+    pub max_lifetime: f32,
+    pub delay: f32,
+    pub direction: Vec2,
+    pub half_length: f32,
+    pub half_width: f32,
     pub hit_enemies: Vec<Entity>,
 }
 
@@ -570,6 +618,21 @@ pub struct XpGem(pub f32);
 #[derive(Component)]
 pub struct HealingDot(pub f32);
 
+/// Once a pickup enters magnet range, it stays locked on. Tracks elapsed chase time
+/// so the pickup accelerates if the player outruns it.
+#[derive(Component)]
+pub struct MagnetLocked(pub f32);
+
+// === Character Animation Config ===
+#[derive(Component, Clone, Copy)]
+pub struct CharacterAnimConfig {
+    pub cols: usize,
+    pub row_front: usize,
+    pub row_back: usize,
+    pub row_side: usize,
+    pub frame_count: usize,
+}
+
 // === Sprite Animation ===
 #[derive(Component)]
 pub struct AnimationIndices {
@@ -671,6 +734,9 @@ pub struct LevelText;
 
 #[derive(Component)]
 pub struct TitleScreenEntity;
+
+#[derive(Component)]
+pub struct CharacterSelectBox(pub usize);
 
 #[derive(Component)]
 pub struct GameOverEntity;
@@ -780,6 +846,63 @@ pub struct SpawnRateSliderFill;
 
 #[derive(Component)]
 pub struct SpawnRateText;
+
+// === CRT Slider UI ===
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CrtParam {
+    Curvature,
+    ChromaticAberration,
+    ScanlineIntensity,
+    PhosphorIntensity,
+    VignetteStrength,
+}
+
+impl CrtParam {
+    pub const ALL: [CrtParam; 5] = [
+        CrtParam::Curvature,
+        CrtParam::ChromaticAberration,
+        CrtParam::ScanlineIntensity,
+        CrtParam::PhosphorIntensity,
+        CrtParam::VignetteStrength,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            CrtParam::Curvature => "Curvature",
+            CrtParam::ChromaticAberration => "Chromatic Aberr.",
+            CrtParam::ScanlineIntensity => "Scanlines",
+            CrtParam::PhosphorIntensity => "Phosphor",
+            CrtParam::VignetteStrength => "Vignette",
+        }
+    }
+
+    /// Returns (min, max) range for the slider
+    pub fn range(&self) -> (f32, f32) {
+        match self {
+            CrtParam::Curvature => (0.0, 0.5),
+            CrtParam::ChromaticAberration => (0.0, 0.015),
+            CrtParam::ScanlineIntensity => (0.0, 1.0),
+            CrtParam::PhosphorIntensity => (0.0, 1.0),
+            CrtParam::VignetteStrength => (0.0, 4.0),
+        }
+    }
+
+    pub fn format_value(&self, value: f32) -> String {
+        match self {
+            CrtParam::ChromaticAberration => format!("{:.4}", value),
+            _ => format!("{:.2}", value),
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct CrtSliderTrack(pub CrtParam);
+
+#[derive(Component)]
+pub struct CrtSliderFill(pub CrtParam);
+
+#[derive(Component)]
+pub struct CrtSliderText(pub CrtParam);
 
 // === Music UI ===
 #[derive(Component)]

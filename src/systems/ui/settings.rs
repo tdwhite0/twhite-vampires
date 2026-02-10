@@ -529,6 +529,64 @@ fn spawn_settings_panel(
                             SettingsCrtCheck,
                         ));
                     });
+
+                    // CRT parameter sliders (only when CRT is enabled)
+                    if crt_on {
+                        for param in CrtParam::ALL {
+                            let value = match param {
+                                CrtParam::Curvature => debug.crt_curvature,
+                                CrtParam::ChromaticAberration => debug.crt_chromatic_aberration,
+                                CrtParam::ScanlineIntensity => debug.crt_scanline_intensity,
+                                CrtParam::PhosphorIntensity => debug.crt_phosphor_intensity,
+                                CrtParam::VignetteStrength => debug.crt_vignette_strength,
+                            };
+                            let (min, max) = param.range();
+                            let fill_pct = ((value - min) / (max - min)).clamp(0.0, 1.0) * 100.0;
+
+                            section.spawn(Node {
+                                width: Val::Percent(100.0),
+                                justify_content: JustifyContent::SpaceBetween,
+                                align_items: AlignItems::Center,
+                                margin: UiRect::top(Val::Px(2.0)),
+                                ..default()
+                            }).with_children(|row| {
+                                row.spawn((
+                                    Text::new(param.label()),
+                                    TextFont { font_size: 11.0, ..default() },
+                                    TextColor(Color::WHITE),
+                                ));
+                                row.spawn((
+                                    CrtSliderText(param),
+                                    Text::new(param.format_value(value)),
+                                    TextFont { font_size: 11.0, ..default() },
+                                    TextColor(ACCENT),
+                                ));
+                            });
+
+                            section.spawn((
+                                CrtSliderTrack(param),
+                                Button,
+                                RelativeCursorPosition::default(),
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    height: Val::Px(12.0),
+                                    margin: UiRect::bottom(Val::Px(2.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgba(0.2, 0.2, 0.2, 0.9)),
+                            )).with_children(|track| {
+                                track.spawn((
+                                    CrtSliderFill(param),
+                                    Node {
+                                        width: Val::Percent(fill_pct),
+                                        height: Val::Percent(100.0),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgb(0.2, 0.5, 0.7)),
+                                ));
+                            });
+                        }
+                    }
                 });
 
                 // === FONT section ===
@@ -736,6 +794,10 @@ pub fn handle_settings_crt(
     mut text_query: Query<&mut Text, With<SettingsCrtCheck>>,
     mut bg_query: Query<&mut BackgroundColor, With<SettingsCrtToggle>>,
     mut camera_query: Query<Entity, (With<Camera2d>, Without<HudCamera>)>,
+    panel_query: Query<Entity, With<SettingsPanel>>,
+    weapons: Res<PlayerWeapons>,
+    music_state: Res<MusicState>,
+    font_state: Res<GameFontState>,
 ) {
     for interaction in query.iter() {
         if *interaction != Interaction::Pressed {
@@ -758,16 +820,25 @@ pub fn handle_settings_crt(
             if debug.crt_enabled {
                 commands.entity(camera_entity).insert(CrtEffect {
                     time: 0.0,
-                    curvature: 0.15,
-                    chromatic_aberration: 0.003,
-                    scanline_intensity: 0.25,
-                    phosphor_intensity: 0.25,
-                    vignette_strength: 1.8,
+                    curvature: debug.crt_curvature,
+                    chromatic_aberration: debug.crt_chromatic_aberration,
+                    scanline_intensity: debug.crt_scanline_intensity,
+                    phosphor_intensity: debug.crt_phosphor_intensity,
+                    vignette_strength: debug.crt_vignette_strength,
+                    _padding1: 0.0,
+                    _padding2: 0.0,
                 });
             } else {
                 commands.entity(camera_entity).remove::<CrtEffect>();
             }
         }
+
+        // Rebuild panel to show/hide CRT sliders
+        for entity in panel_query.iter() {
+            commands.entity(entity).despawn();
+        }
+        spawn_settings_panel(&mut commands, &debug, &weapons, &music_state, &font_state);
+        return;
     }
 }
 
@@ -1095,6 +1166,65 @@ pub fn handle_spawn_rate_slider(
 
     if let Ok(mut text) = text_query.single_mut() {
         **text = format!("{:.1}x", value);
+    }
+}
+
+pub fn handle_crt_sliders(
+    mut debug: ResMut<DebugSettings>,
+    track_query: Query<
+        (&Interaction, &RelativeCursorPosition, &CrtSliderTrack),
+        With<CrtSliderTrack>,
+    >,
+    mut fill_query: Query<(&mut Node, &CrtSliderFill)>,
+    mut text_query: Query<(&mut Text, &CrtSliderText)>,
+    mut crt_query: Query<&mut CrtEffect>,
+) {
+    for (interaction, relative_cursor, track) in track_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        let Some(pos) = relative_cursor.normalized else {
+            continue;
+        };
+
+        let param = track.0;
+        let (min, max) = param.range();
+        let t = (pos.x + 0.5).clamp(0.0, 1.0);
+        let value = min + t * (max - min);
+
+        match param {
+            CrtParam::Curvature => debug.crt_curvature = value,
+            CrtParam::ChromaticAberration => debug.crt_chromatic_aberration = value,
+            CrtParam::ScanlineIntensity => debug.crt_scanline_intensity = value,
+            CrtParam::PhosphorIntensity => debug.crt_phosphor_intensity = value,
+            CrtParam::VignetteStrength => debug.crt_vignette_strength = value,
+        }
+
+        // Update fill bar
+        for (mut node, fill) in fill_query.iter_mut() {
+            if fill.0 == param {
+                node.width = Val::Percent(t * 100.0);
+            }
+        }
+
+        // Update text
+        for (mut text, text_param) in text_query.iter_mut() {
+            if text_param.0 == param {
+                **text = param.format_value(value);
+            }
+        }
+
+        // Update CrtEffect component on camera
+        for mut crt in crt_query.iter_mut() {
+            match param {
+                CrtParam::Curvature => crt.curvature = value,
+                CrtParam::ChromaticAberration => crt.chromatic_aberration = value,
+                CrtParam::ScanlineIntensity => crt.scanline_intensity = value,
+                CrtParam::PhosphorIntensity => crt.phosphor_intensity = value,
+                CrtParam::VignetteStrength => crt.vignette_strength = value,
+            }
+        }
     }
 }
 
